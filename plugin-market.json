@@ -1,0 +1,94 @@
+{
+  "format": 1,
+  "title": {
+    "en": "Jet Hub Plugins",
+    "zh": "Jet Hub 插件源"
+  },
+  "description": {
+    "en": "Plugins maintained in the deepseek-harness-codearts repository. Git sources are pinned to full commits.",
+    "zh": "deepseek-harness-codearts 仓库维护的插件。Git 来源固定到完整 commit。"
+  },
+  "metadata": {
+    "categories": {
+      "model": {
+        "title": {
+          "en": "Models & Providers",
+          "zh": "模型与账号接入"
+        }
+      }
+    },
+    "labels": {
+      "verified": {
+        "title": {
+          "en": "Verified on this machine",
+          "zh": "本机实测通过"
+        }
+      },
+      "git": {
+        "title": {
+          "en": "Install from Git",
+          "zh": "从 Git 安装"
+        }
+      }
+    },
+    "sortKeys": {
+      "stars": {
+        "title": {
+          "en": "Stars",
+          "zh": "星标"
+        },
+        "order": "desc"
+      }
+    }
+  },
+  "plugins": [
+    {
+      "name": "dsh-providers-hub",
+      "title": {
+        "en": "Providers Hub (Jet Hub)",
+        "zh": "Providers Hub（Jet Hub）"
+      },
+      "description": {
+        "en": "One hub for AI coding providers: account login, multi-account pools, silent credential refresh, credit claiming, and a local OpenAI-compatible gateway.",
+        "zh": "一站式 AI 编程渠道中枢：账号登录、多账号池、静默凭据续期、积分领取，以及本地 OpenAI 兼容网关。"
+      },
+      "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJQcm92aWRlcnMgSHViIj4KICA8cmVjdCB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHJ4PSIxNCIgZmlsbD0iIzFmNmZlYiIvPgogIDxnIHN0cm9rZT0iI2ZmZmZmZiIgc3Ryb2tlLXdpZHRoPSIzLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCI+CiAgICA8cGF0aCBkPSJNMzIgMjVWMTNNMzIgMzl2MTJNMjUgMzJIMTNNMzkgMzJoMTIiLz4KICA8L2c+CiAgPGNpcmNsZSBjeD0iMzIiIGN5PSIzMiIgcj0iNyIgZmlsbD0iI2ZmZmZmZiIvPgogIDxjaXJjbGUgY3g9IjMyIiBjeT0iMTIiIHI9IjQuNSIgZmlsbD0iIzllY2JmZiIvPgogIDxjaXJjbGUgY3g9IjMyIiBjeT0iNTIiIHI9IjQuNSIgZmlsbD0iIzllY2JmZiIvPgogIDxjaXJjbGUgY3g9IjEyIiBjeT0iMzIiIHI9IjQuNSIgZmlsbD0iIzllY2JmZiIvPgogIDxjaXJjbGUgY3g9IjUyIiBjeT0iMzIiIHI9IjQuNSIgZmlsbD0iIzllY2JmZiIvPgo8L3N2Zz4K",
+      "author": "iJetLi",
+      "homepage": "https://gitee.com/iJetLi/deepseek-harness-codearts",
+      "repository": {
+        "url": "https://gitee.com/iJetLi/deepseek-harness-codearts"
+      },
+      "metadata": {
+        "category": "model",
+        "keywords": [
+          "dsh-plugin",
+          "providers",
+          "oauth",
+          "gateway",
+          "credentials"
+        ],
+        "labels": [
+          "verified",
+          "git"
+        ],
+        "sortKeys": {
+          "stars": 1
+        }
+      },
+      "versions": [
+        {
+          "version": "0.2.0-rc.11",
+          "publishTimestamp": 1792151281,
+          "source": {
+            "type": "git",
+            "url": "https://gitee.com/iJetLi/deepseek-harness-codearts",
+            "commit": "7a3b64a16d0b67c1c16c4cb3251255b45105ec1c"
+          },
+          "engines": {
+            "dsh": "0.1.2-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1"
+          }
+        }
+      ]
+    }
+  ]
+}
