@@ -64,15 +64,39 @@ DSH 的索引是一个 JSON 文件，`format: 1`，顶层字段：
 
 ## 维护
 
-索引由脚本生成，**不要手改**：
+索引由脚本生成，**不要手改**。有两条路径，共用同一份构建规则
+（`scripts/lib/index-rules.mjs`），可以交替使用、结果互相叠加：
+
+### 自动（推荐）：GitHub Actions 定时同步
+
+`.github/workflows/sync-plugin-index.yml` 每 6 小时主动去读上游 Gitee 仓库的最新 commit，
+有新版本就更新索引并提交回本仓库。**不需要在上游放任何凭据。**
+
+也可以在 **Actions → sync-plugin-index → Run workflow** 手动触发。
+
+⚠️ 一个必须知道的语义：**DSH 判断「有没有新版本」用的是 SemVer 比较，不是 commit 比较**。
+所以只有上游**真的抬了版本号**，已安装的用户才会看到「有新版本」；上游只改代码不抬版本号时，
+脚本会**重定最新版本那条的 commit**，让**新安装**的用户拿到最新代码，但老用户不会看到更新提示。
+
+详见 [docs/ci-sync.md](docs/ci-sync.md)。
+
+### 手动：在插件仓库里生成
 
 ```sh
 # 在插件仓库根目录执行（需要该仓库有完整 Git 历史）
 node ../dsh-plugin-index/scripts/generate-index.mjs --out ../dsh-plugin-index/plugin-market.json
 ```
 
-脚本会读取插件仓库的 `package.json` 与 `HEAD`，产出固定到该 commit 的一个版本条目，
-并推导 `engines.dsh`。发布新版本时重跑脚本、提交、推送即可。
+脚本会读取插件仓库的 `package.json` 与 `HEAD`，把该 commit 并入索引并推导 `engines.dsh`。
+
+### 常用命令（在索引仓库里）
+
+```sh
+npm install            # 只装官方校验器
+npm run sync:dry       # 看会怎么改，不写文件
+npm run sync           # 写 plugin-market.json
+npm run validate       # 只校验现有索引
+```
 
 ## 校验
 

@@ -1,0 +1,93 @@
+name: sync-plugin-index
+
+# 定时从**上游插件仓库**（Gitee）拉取最新 commit，把新版本并入 plugin-market.json 并提交回本仓库。
+#
+# 为什么是「拉」而不是让上游「推」：上游在 Gitee，本索引在 GitHub，
+# 用 GitHub 托管 runner 主动去读 Gitee 是最省事、也不需要在上游放任何凭据的做法。
+# 可达性已实测（见 docs/ci-sync.md 的「探针结论」）。
+#
+# 触发：
+# - schedule：每 6 小时一次（GitHub 的 cron 用 UTC，且高峰期会排队延迟几分钟到几十分钟）；
+# - workflow_dispatch：手动，可临时换上游仓库或关掉「同版本重定 commit」。
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: 上游插件仓库地址（留空用默认）
+        required: false
+        default: ''
+      no_repin:
+        description: 版本号未变时不重定 commit
+        required: false
+        type: boolean
+        default: false
+
+# 需要写权限才能把同步结果推回本仓库。
+permissions:
+  contents: write
+
+# 同一时刻只跑一个同步，避免两个 run 抢着 push。
+concurrency:
+  group: sync-plugin-index
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出索引仓库
+        uses: actions/checkout@v5
+
+      - name: 准备 Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: 安装官方索引校验器
+        run: npm install --no-audit --no-fund
+
+      - name: 读取上游最新 commit 并更新索引
+        id: sync
+        env:
+          INPUT_REPO: ${{ inputs.repo }}
+          INPUT_NO_REPIN: ${{ inputs.no_repin }}
+        run: |
+          args=(--out plugin-market.json --require-validator)
+          if [ -n "$INPUT_REPO" ]; then args+=(--repo "$INPUT_REPO"); fi
+          if [ "$INPUT_NO_REPIN" = "true" ]; then args+=(--no-repin); fi
+          node scripts/update-index.mjs "${args[@]}"
+
+      - name: 复核写出的索引
+        run: node scripts/validate-index.mjs --out plugin-market.json
+
+      - name: 提交并推送
+        if: steps.sync.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.sync.outputs.version }}
+          ACTION: ${{ steps.sync.outputs.action }}
+          COMMIT: ${{ steps.sync.outputs.commit }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add plugin-market.json
+          git commit -m "chore(index): 同步 dsh-providers-hub@${VERSION}（${ACTION}，commit ${COMMIT:0:7}）"
+          git push
+
+      - name: 汇总
+        env:
+          VERSION: ${{ steps.sync.outputs.version }}
+          ACTION: ${{ steps.sync.outputs.action }}
+          CHANGED: ${{ steps.sync.outputs.changed }}
+        run: |
+          {
+            echo "### 插件索引同步"
+            echo
+            echo "| 项 | 值 |"
+            echo "|---|---|"
+            echo "| 上游最新版本 | \`${VERSION}\` |"
+            echo "| 版本条目动作 | \`${ACTION}\` |"
+            echo "| 索引是否变化 | \`${CHANGED}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

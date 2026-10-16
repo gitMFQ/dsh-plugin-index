@@ -1,0 +1,54 @@
+name: validate-index
+
+# 任何改动 plugin-market.json 的 push / PR 都要先过官方校验器。
+# 值得单独跑的原因：DSH「发现」页对非法索引只显示一条「读取失败」，不告诉你是哪一行错了。
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'plugin-market.json'
+      - 'scripts/**'
+      - 'package.json'
+      - '.github/workflows/validate-index.yml'
+  pull_request:
+    paths:
+      - 'plugin-market.json'
+      - 'scripts/**'
+      - 'package.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - run: npm install --no-audit --no-fund
+
+      - name: 校验 plugin-market.json
+        run: node scripts/validate-index.mjs --out plugin-market.json
+
+      # --check 在「上游有新版本还没同步」时退出 1，那是正常状态而非本工作流的失败原因，
+      # 所以这里只断言它没有崩（0 与 1 都算通过），并且确实没有改写文件。
+      - name: 校验同步脚本可运行且不写文件
+        run: |
+          before=$(sha256sum plugin-market.json | cut -d' ' -f1)
+          node scripts/update-index.mjs --check --out plugin-market.json && code=0 || code=$?
+          if [ "$code" != "0" ] && [ "$code" != "1" ]; then
+            echo "::error::update-index.mjs --check 异常退出（code=$code）"
+            exit "$code"
+          fi
+          after=$(sha256sum plugin-market.json | cut -d' ' -f1)
+          if [ "$before" != "$after" ]; then
+            echo "::error::--check 改写了 plugin-market.json"
+            exit 1
+          fi
+          echo "--check 正常（exit=$code），索引文件未被改写"
