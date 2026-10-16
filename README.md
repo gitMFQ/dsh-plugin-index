@@ -8,13 +8,22 @@ DSH（DeepSeek Harness）**自定义插件市场索引**（`format: 1`）。
 ## 索引源地址
 
 ```
-https://raw.giteeusercontent.com/gitMFQ/dsh-plugin-index/raw/master/plugin-market.json
+https://raw.githubusercontent.com/gitMFQ/dsh-plugin-index/master/plugin-market.json
 ```
 
-> ⚠️ **必须用上面这个 `raw.giteeusercontent.com` 地址。**
-> `https://gitee.com/<owner>/<repo>/raw/master/plugin-market.json` 会返回 **302 跳转**，
-> 而 DSH 读取索引时用的是 `redirect: "error"` —— 遇到跳转直接判为失败，
-> 「发现」页只会显示一条读取失败，不会告诉你原因。
+国内网络直连 `raw.githubusercontent.com` 不稳定时，可改用 jsDelivr 镜像（内容相同）：
+
+```
+https://cdn.jsdelivr.net/gh/gitMFQ/dsh-plugin-index@master/plugin-market.json
+```
+
+> ⚠️ **不要用带跳转的地址。** DSH 读取索引时用的是 `redirect: "error"`，
+> 遇到 302 直接判为失败，「发现」页只显示一条读取失败、不告诉你原因。
+> 实测：上面两个地址都是 **200 + 零跳转**；而 Gitee 的
+> `https://gitee.com/<owner>/<repo>/raw/<branch>/<file>` 是 **302**，**不能**用作索引源
+> （必须换成它 302 指向的 `raw.giteeusercontent.com` 直链）。
+> `cdn.jsdelivr.net/gh/...@<branch>/...` 在浏览器里会 301 到带版本号的地址，
+> 但索引是**宿主进程**用 `fetch` 读的，实测直连 200、零跳转。
 
 ## 收录内容
 
