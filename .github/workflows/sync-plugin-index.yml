@@ -7,11 +7,14 @@ name: sync-plugin-index
 # 可达性已实测（见 docs/ci-sync.md 的「探针结论」）。
 #
 # 触发：
-# - schedule：每 10 分钟一次（GitHub 的 cron 用 UTC，高峰期会排队延迟几分钟）；
+# - schedule：每 10 分钟一次，但**错开整点对齐**（:03/:13/:23/:33/:43/:53）。
+#   官方文档明确：`schedule` 在高负载时会延迟，负载足够高时**排队任务会被丢弃**，
+#   而「整点（start of every hour）」正是高负载时段，并建议避开整点的对齐槽位。
+#   用 `*/10` 会精确落在 :00/:10/:20… 这些最拥挤的槽位，故写成显式列表。
 # - workflow_dispatch：手动，可临时换上游仓库或关掉「同版本重定 commit」。
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '3,13,23,33,43,53 * * * *'
   workflow_dispatch:
     inputs:
       repo:
