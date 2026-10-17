@@ -22,10 +22,20 @@ on:
         required: false
         default: ''
       no_repin:
-        description: 版本号未变时不重定 commit（安装目标会冻结在索引现有 commit）
+        description: 版本号未变时不重定 commit
         required: false
         type: boolean
         default: false
+      commit_version:
+        description: 把 commit 编进版本号，让「只改代码没抬版本号」也能点升级
+        required: false
+        type: choice
+        default: 自动
+        options:
+          - 自动
+          - 关闭
+          - prerelease
+          - build
 
 # 需要写权限才能把同步结果推回本仓库。
 permissions:
@@ -57,11 +67,17 @@ jobs:
         env:
           INPUT_REPO: ${{ inputs.repo }}
           INPUT_NO_REPIN: ${{ inputs.no_repin }}
+          # 定时触发时 inputs 为空字符串；「自动」= 沿用索引里已有的形态（粘性），不传开关。
+          INPUT_COMMIT_VERSION: ${{ inputs.commit_version }}
         run: |
-          # 版本号一律写上游原值；安装目标靠 repin 跟到上游最新 commit。
           args=(--out plugin-market.json --require-validator)
           if [ -n "$INPUT_REPO" ]; then args+=(--repo "$INPUT_REPO"); fi
           if [ "$INPUT_NO_REPIN" = "true" ]; then args+=(--no-repin); fi
+          # 自动 = 不加 --commit-version（由脚本按索引现状决定沿用还是退场）。
+          case "$INPUT_COMMIT_VERSION" in
+            prerelease|build) args+=(--commit-version "$INPUT_COMMIT_VERSION") ;;
+            关闭) args+=(--commit-version never) ;;
+          esac
           node scripts/update-index.mjs "${args[@]}"
 
       - name: 复核写出的索引

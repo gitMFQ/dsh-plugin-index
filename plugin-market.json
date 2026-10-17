@@ -5,8 +5,8 @@
     "zh": "Jet Hub 插件源"
   },
   "description": {
-    "en": "Plugins maintained in the deepseek-harness-codearts repository. Git sources are pinned to a full commit, re-resolved to the upstream HEAD on every sync.",
-    "zh": "deepseek-harness-codearts 仓库维护的插件。Git 来源固定到完整 commit，每次同步重定到上游最新提交。"
+    "en": "Plugins maintained in the deepseek-harness-codearts repository. Git sources are pinned to full commits.",
+    "zh": "deepseek-harness-codearts 仓库维护的插件。Git 来源固定到完整 commit。"
   },
   "metadata": {
     "categories": {
@@ -77,12 +77,12 @@
       },
       "versions": [
         {
-          "version": "0.2.0-rc.11",
-          "publishTimestamp": 1792241990,
+          "version": "0.2.0-rc.11.commit.48b6c5f",
+          "publishTimestamp": 1792255254,
           "source": {
             "type": "git",
             "url": "https://gitee.com/iJetLi/deepseek-harness-codearts",
-            "commit": "e0eb8023e6b20e98b7ad3a74ca78f71c354a038c"
+            "commit": "48b6c5ff69eab3cba42618395aff34560e871d6f"
           },
           "engines": {
             "dsh": "^0.1.2-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1"

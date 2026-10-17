@@ -40,16 +40,10 @@ https://cdn.jsdelivr.net/gh/gitMFQ/dsh-plugin-index@master/plugin-market.json
 
 | 插件 | 版本 | 来源 |
 |---|---|---|
-| `dsh-providers-hub` | 见 `plugin-market.json` | 固定到上游最新提交的 Git 来源 |
+| `dsh-providers-hub` | 见 `plugin-market.json` | 固定到完整 commit 的 Git 来源 |
 
 来源是 `https://gitee.com/iJetLi/deepseek-harness-codearts`，每个版本都锁定到
-**完整 40 位 commit**（不是浮动分支），DSH 的安装参数就是 `git+<url>#<commit>`。
-
-两条语义决定你点「安装」会拿到什么代码：
-
-- **版本号是上游 `package.json` 里的原值**，索引不改写它（不写 `+commit.xxxxxxx` 之类后缀）。
-- **最新那条版本的 commit 跟着上游走**：每次同步都把它重定到上游最新提交，
-  所以**安装拿到的永远是最新提交**；历史版本条目则不再改动。
+**完整 40 位 commit**，不是浮动分支 —— 索引一旦发布就不会被上游推进悄悄改变。
 
 ## 索引格式要点
 
@@ -91,16 +85,14 @@ DSH 的索引是一个 JSON 文件，`format: 1`，顶层字段：
 
 也可以在 **Actions → sync-plugin-index → Run workflow** 手动触发。
 
-⚠️ 两个必须知道的语义：
+⚠️ 一个必须知道的语义：**DSH 判断「有没有新版本」用的是 SemVer 比较，不是 commit 比较**。
+所以只有上游**真的抬了版本号**，已安装的用户才会看到「有新版本」；上游只改代码不抬版本号时，
+脚本会**重定最新版本那条的 commit**，让**新安装**的用户拿到最新代码，但老用户不会看到更新提示。
 
-1. **DSH 判断「有没有新版本」用的是 SemVer 比较，不是 commit 比较**。只有上游
-   **真的抬了版本号**，已安装的用户才会看到「有新版本」。上游只改代码、不抬版本号时，
-   脚本会把**最新那条的 commit 重定到上游最新提交**：新装用户照样拿到最新代码，
-   已装同版本的用户则看不到更新提示（想让老用户也看到，正解是让上游抬版本号）。
-2. **版本号里不写 commit**，索引版本恒等于上游发布的值。早期试过写成
-   `0.2.0-rc.11.commit.15f2a79` 来骗出一个可点的安装按钮，但本机装的仍是
-   `0.2.0-rc.11`，与索引版本**永不相等** —— 装完「有新版本」徽标不会消失，
-   是个装不掉的假更新。该写法已废弃，索引里若还留着这类合成条目，同步时会自动清掉。
+想让「只改代码没抬版本号」也能点升级，手动触发时把 `commit_version` 选成
+`prerelease`（推荐）或 `build`：索引版本会写成 `0.2.0-rc.11.commit.15f2a79`
+这类形态，既能出现可点的安装按钮，又不会压住上游未来的真版本 `0.2.0-rc.12`。
+代价是装完后「有新版本」提示不会自动消失（本机版本号没变），装一次即可，无害。
 
 详见 [docs/ci-sync.md](docs/ci-sync.md)。
 
@@ -119,6 +111,7 @@ node ../dsh-plugin-index/scripts/generate-index.mjs --out ../dsh-plugin-index/pl
 npm install            # 只装官方校验器
 npm run sync:dry       # 看会怎么改，不写文件
 npm run sync           # 写 plugin-market.json
+npm run sync:commit-version   # 同 sync，但把 commit 编进版本号（让只改代码也能点升级）
 npm run validate       # 只校验现有索引
 ```
 
