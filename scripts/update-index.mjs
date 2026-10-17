@@ -22,6 +22,32 @@
  *   node scripts/update-index.mjs --check         # 有变化则退出码 1（给 CI 做门禁用）
  *   node scripts/update-index.mjs --repo <url>    # 换上游仓库
  *   node scripts/update-index.mjs --no-repin      # 不重定同版本的 commit
+ *   node scripts/update-index.mjs --commit-version              # 把 commit 编进版本号（默认 prerelease 形态）
+ *   node scripts/update-index.mjs --commit-version build        # 用 build metadata 形态（更保守）
+ *
+ * `--commit-version`：让「commit 不同」也能点升级
+ * ---------------------------------------------
+ * DSH 判断「有没有新版本」**只比 SemVer 字符串，永远不看 commit**：
+ * 卡片徽标是 `semver.gt(索引版本, 已安装版本)`，版本行「安装」按钮是
+ * `installedVersion !== version.version` 的**字符串**比较。
+ * 所以上游只改代码、不抬版本号时，索引版本 == 已安装版本，按钮根本不出现。
+ *
+ * 打开本开关后，版本写成下面两种形态之一（详细对比见 docs/ci-sync.md）：
+ * - `prerelease`（默认）：`0.2.0-rc.11.commit.15f2a79`
+ *   大于 `rc.11`（徽标显示「有新版本」），又小于上游未来的 `rc.12`（不压住真版本）。
+ * - `build`：`0.2.0-rc.11+commit.15f2a79`
+ *   build metadata 按 SemVer 规范不参与优先级比较，天生压不住任何版本，最保守；
+ *   代价是 `semver.gt` 恒为 false，卡片徽标只显示「已安装」，得点进详情页才看到安装按钮。
+ *
+ * **绝不要**用连字符形态 `0.2.0-rc.11-15f2a79`：prerelease 会切成 `["rc","11-15f2a79"]`，
+ * 而纯数字标识符优先级低于含字母标识符，`11-15f2a79` **大于** `12`，
+ * 合成版本会永久压住上游未来的真版本。
+ *
+ * 同一版本核心只保留最新那条（pruneBase），上游反复推送不会让索引无限膨胀。
+ *
+ * 代价（说清楚才好决定要不要开）：本机装的 `package.json` 里版本仍是 `0.2.0-rc.11`，
+ * 与索引的合成版本永远不等，所以「有新版本」提示在装完后**不会自动消失**，
+ * 装一次即可，是无害的重复安装。想要干净的更新提示，仍应让上游抬版本号。
  */
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -35,6 +61,7 @@ import {
   loadIndexDocument,
   mergeVersion,
   readCheckout,
+  syntheticVersion,
   upsertPlugin,
   validateIndex,
 } from './lib/index-rules.mjs'
@@ -129,6 +156,18 @@ async function readRemoteByClone(repoUrl) {
 const repoUrl = arg('repo', DEFAULT_REPO_URL)
 const out = resolve(arg('out', 'plugin-market.json'))
 const repin = !flag('no-repin')
+
+// `--commit-version`（可选形态：`--commit-version prerelease|build`，默认 prerelease）。
+// 不带该开关时版本号与上游完全一致（此时上游不抬版本号就点不了升级）。
+const styleIndex = process.argv.indexOf('--commit-version')
+const styleArg = styleIndex === -1 ? undefined : process.argv[styleIndex + 1]
+// 后面紧跟另一个开关（或没有值）时按默认形态处理，例如 `--commit-version --dry-run`。
+const commitVersion =
+  styleIndex === -1 ? false : styleArg === undefined || styleArg.startsWith('--') ? 'prerelease' : styleArg
+if (commitVersion !== false && !['prerelease', 'build'].includes(commitVersion)) {
+  throw new Error(`--commit-version 只接受 prerelease 或 build，收到：${commitVersion}`)
+}
+
 const dryRun = flag('dry-run') || flag('check')
 
 // 索引里的 source.url / homepage 必须是 https 仓库地址（format 1 会拒绝 file:// 等形态），
@@ -148,7 +187,11 @@ if (enginesDsh === '') {
 }
 
 const entry = buildVersionEntry({
-  version: remote.manifest.version,
+  // 打开 --commit-version 时，版本号编入 commit（只动版本字符串，commit 与时间戳照旧）。
+  version:
+    commitVersion === false
+      ? remote.manifest.version
+      : syntheticVersion(remote.manifest.version, remote.commit, commitVersion),
   publishTimestamp: remote.publishTimestamp,
   commit: remote.commit,
   repoUrl,
@@ -158,7 +201,10 @@ const entry = buildVersionEntry({
 const document = loadIndexDocument(out)
 const plugin = document.plugins.find((candidate) => candidate.name === remote.manifest.name)
 const before = JSON.stringify(document)
-const { versions, action } = mergeVersion(plugin?.versions ?? [], entry, { repin })
+const { versions, action } = mergeVersion(plugin?.versions ?? [], entry, {
+  repin,
+  pruneBase: commitVersion !== false,
+})
 upsertPlugin(document, { manifest: remote.manifest, versions, repoUrl })
 const after = JSON.stringify(document)
 

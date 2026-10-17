@@ -7,6 +7,7 @@
   "scripts": {
     "sync": "node scripts/update-index.mjs",
     "sync:dry": "node scripts/update-index.mjs --dry-run",
+    "sync:commit-version": "node scripts/update-index.mjs --commit-version",
     "validate": "node scripts/validate-index.mjs"
   },
   "devDependencies": {

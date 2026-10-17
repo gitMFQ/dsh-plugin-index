@@ -78,6 +78,11 @@ DSH 的索引是一个 JSON 文件，`format: 1`，顶层字段：
 所以只有上游**真的抬了版本号**，已安装的用户才会看到「有新版本」；上游只改代码不抬版本号时，
 脚本会**重定最新版本那条的 commit**，让**新安装**的用户拿到最新代码，但老用户不会看到更新提示。
 
+想让「只改代码没抬版本号」也能点升级，手动触发时把 `commit_version` 选成
+`prerelease`（推荐）或 `build`：索引版本会写成 `0.2.0-rc.11.commit.15f2a79`
+这类形态，既能出现可点的安装按钮，又不会压住上游未来的真版本 `0.2.0-rc.12`。
+代价是装完后「有新版本」提示不会自动消失（本机版本号没变），装一次即可，无害。
+
 详见 [docs/ci-sync.md](docs/ci-sync.md)。
 
 ### 手动：在插件仓库里生成
@@ -95,6 +100,7 @@ node ../dsh-plugin-index/scripts/generate-index.mjs --out ../dsh-plugin-index/pl
 npm install            # 只装官方校验器
 npm run sync:dry       # 看会怎么改，不写文件
 npm run sync           # 写 plugin-market.json
+npm run sync:commit-version   # 同 sync，但把 commit 编进版本号（让只改代码也能点升级）
 npm run validate       # 只校验现有索引
 ```
 

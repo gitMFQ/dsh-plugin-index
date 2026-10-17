@@ -131,6 +131,62 @@ function sortVersionsDescending(versions) {
 }
 
 /**
+ * 去掉合成 commit 标记，得到上游的「版本核心」。
+ *
+ * 同时认得两种合成形态：`0.2.0-rc.11.commit.7a3b64a`（点号）与 `0.2.0-rc.11+commit.7a3b64a`（build metadata）。
+ * 上游自己写了 build metadata（如 `1.0.0+nightly`）时，点号形态会把整串当核心保留。
+ */
+export function baseVersionOf(version) {
+  const dotted = /^(.+?)\.commit\.[0-9a-f]{4,40}$/u.exec(version)
+  if (dotted !== null) return dotted[1]
+  const at = version.indexOf('+')
+  return at === -1 ? version : version.slice(0, at)
+}
+
+/**
+ * 把 commit 编进版本号，让「commit 不同」也能点升级。
+ *
+ * **动机**：DSH 判断有没有新版本只比 SemVer 字符串，**从不看 commit**
+ * （市场卡片徽标是 `semver.gt(索引版本, 已安装版本)`；版本行的「安装」按钮是
+ * `installedVersion === version.version` 的**字符串**相等判断）。
+ * 所以上游只改代码、不抬版本号时，本机 `0.2.0-rc.11` 和索引 `0.2.0-rc.11` 完全相等，
+ * 按钮根本不出现——这是本次改造要解决的唯一问题。
+ *
+ * **两种形态**（`style`）：
+ * - `'prerelease'`（默认）→ `0.2.0-rc.11.commit.7a3b64a`
+ *   prerelease 按点切开是 `["rc","11","commit","7a3b64a"]`，
+ *   因为第 3 段多了标识符，所以**大于** `0.2.0-rc.11`（徽标显示「有新版本」），
+ *   又因为第 2 段 `11` < `12`，所以**小于**上游未来的 `0.2.0-rc.12`，不会盖住真版本。
+ * - `'build'` → `0.2.0-rc.11+commit.7a3b64a`
+ *   build metadata 按规范**不参与优先级比较**，天生压不住任何版本，最保守；
+ *   代价是 `semver.gt` 恒为 false，卡片徽标只显示「已安装」，得点进详情页才看到安装按钮。
+ *
+ * **绝对不能用**连字符形态 `0.2.0-rc.11-7a3b64a`：prerelease 会被切成 `["rc","11-7a3b64a"]`，
+ * 而 SemVer 规定**纯数字标识符优先级低于含字母标识符**，于是 `11-7a3b64a` **大于** `12`，
+ * 合成版本会永久压住上游未来的真版本，索引里永远选中旧的那条。
+ *
+ * @param version - 上游 `package.json` 里的版本。
+ * @param commit - 完整 40 位 commit；只取前 7 位写进版本号（完整值仍在 `source.commit` 里）。
+ * @param style - `'prerelease'`（默认）或 `'build'`。
+ * @returns 合成后的版本字符串；上游自带 build metadata 时追加而不是覆盖。
+ */
+export function syntheticVersion(version, commit, style = 'prerelease') {
+  if (style !== 'prerelease' && style !== 'build') {
+    throw new Error(`未知的合成版本形态：${style}（应为 prerelease 或 build）`)
+  }
+  const at = version.indexOf('+')
+  const base = at === -1 ? version : version.slice(0, at)
+  const existing = at === -1 ? '' : version.slice(at + 1)
+  const short = commit.slice(0, 7)
+  if (style === 'build') {
+    const tag = `commit.${short}`
+    return `${base}+${existing === '' ? tag : `${existing}.${tag}`}`
+  }
+  // 点号形态：上游自带 build metadata 时把 `+` 换成 `.`，避免把 `+` 放进 prerelease 段。
+  return existing === '' ? `${base}.commit.${short}` : `${base}.${existing}.commit.${short}`
+}
+
+/**
  * 构造一个版本条目。
  *
  * @param entry - `version` / `publishTimestamp` / `commit` / `repoUrl` / `enginesDsh`。
@@ -148,24 +204,43 @@ export function buildVersionEntry({ version, publishTimestamp, commit, repoUrl, 
 /**
  * 把一个新条目并入既有 `versions[]`。
  *
- * 三种结局：
+ * 四种结局：
  * - `appended`：该 version 尚不存在 → 追加（「发现」页会显示「有新版本」）；
  * - `repinned`：该 version 已存在、且是**最新版本**，但 commit/时间戳变了 → 改写这一个条目；
+ * - `replaced`：`--commit-version` 模式下，同一 commit 核心的旧合成版本被新 commit 顶掉；
  * - `kept` / `unchanged`：保持不动（同 version 且非最新版本的历史条目**不可变**）。
  *
  * @param existing - 现有 `versions[]`（可为空数组）。
  * @param entry - `buildVersionEntry()` 的产物。
  * @param options.repin - 是否允许同版本重定 commit，默认允许。
+ * @param options.pruneBase - 是否清掉「同一版本核心、但 commit 已被顶替」的旧合成条目
+ *   （`--commit-version` 模式用，避免索引无限增长）。
  * @returns `{ versions, action }`；`versions` 已按 SemVer 降序排列。
  */
-export function mergeVersion(existing, entry, { repin = true } = {}) {
-  const versions = existing.map((version) => structuredClone(version))
+export function mergeVersion(existing, entry, { repin = true, pruneBase = false } = {}) {
+  let versions = existing.map((version) => structuredClone(version))
+
+  // 合成版本模式下，同一版本核心只保留**目标那一条**：
+  // 上游在 `0.2.0-rc.11` 上又推了代码时，旧的 `0.2.0-rc.11` 与
+  // `0.2.0-rc.11.commit.aaaaaaa` 都会被 `0.2.0-rc.11.commit.bbbbbbb` 取代。
+  // 判据是「版本核心相同、但版本字符串不同」——同一版本号留两条没有意义，
+  // 而核心不同的历史版本（如未来的 `0.2.0-rc.12`）照旧保留。
+  let replaced = false
+  if (pruneBase) {
+    const base = baseVersionOf(entry.version)
+    const before = versions.length
+    versions = versions.filter(
+      (version) => baseVersionOf(version.version) !== base || version.version === entry.version,
+    )
+    replaced = versions.length !== before
+  }
+
   const at = versions.findIndex((version) => version.version === entry.version)
 
   if (at === -1) {
     versions.push(structuredClone(entry))
     sortVersionsDescending(versions)
-    return { versions, action: 'appended' }
+    return { versions, action: replaced ? 'replaced' : 'appended' }
   }
 
   const current = versions[at]
