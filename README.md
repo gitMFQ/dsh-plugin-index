@@ -75,7 +75,7 @@ DSH 的索引是一个 JSON 文件，`format: 1`，顶层字段：
 
 ### 自动（推荐）：GitHub Actions 定时同步
 
-`.github/workflows/sync-plugin-index.yml` 每 6 小时主动去读上游 Gitee 仓库的最新 commit，
+`.github/workflows/sync-plugin-index.yml` 每 10 分钟主动去读上游 Gitee 仓库的最新 commit，
 有新版本就更新索引并提交回本仓库。**不需要在上游放任何凭据。**
 
 也可以在 **Actions → sync-plugin-index → Run workflow** 手动触发。

@@ -39,7 +39,7 @@ GitHub 托管 runner（`ubuntu-latest`）**可以直连 Gitee**，四种方式�
 
 ### `.github/workflows/sync-plugin-index.yml`
 
-- **触发**：`schedule` 每 6 小时一次（`17 */6 * * *`，**UTC**；GitHub 高峰期会排队，可能延迟几分钟到几十分钟），
+- **触发**：`schedule` 每 10 分钟一次（`*/10 * * * *`，**UTC**；GitHub 高峰期会排队，可能延迟几分钟），
   外加 `workflow_dispatch` 手动触发（可临时换上游仓库、可关掉「同版本重定 commit」）。
 - **权限**：`permissions: contents: write` —— 默认 token 是只读，必须显式提权。
 - **并发**：`concurrency: sync-plugin-index`，避免两个 run 抢着 push。
@@ -159,7 +159,15 @@ node scripts/update-index.mjs --check   # 有变化则退出码 1（给 CI / 脚
 - **只有 Gitee 上游**：`--repo` 目前只认 `gitee.com` 形式。上游若迁到 GitHub，
   换成 `gh api` / 直接 `git ls-remote` 即可，规则文件不用动。
 - **cron 不精确**：GitHub 的 `schedule` 在高峰期会延迟，且仓库 60 天无活动会自动停用定时任务
-  （本仓库由 CI 自己提交，一般不会闲置到 60 天）。
+  （本仓库由 CI 自己提交，一般不会闲置到 60 天）。GitHub 的 schedule 最小间隔是 5 分钟，
+  10 分钟是安全值；但「10 分钟一次」只是**触发上限**，高峰期实际可能拖后几分钟。
+- **10 分钟一次的代价**：
+  - 运行分钟**不花钱**：公共仓库用标准 GitHub 托管 runner 是免费额度外的（
+    见 [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)）。
+  - API 调用量上来了：每次 run 打两次 Gitee OpenAPI（`commits` + `contents`），
+    10 分钟一次约 **288 次/天**；未认证调用可能被限流，脚本已有 3 次退避重试 +
+    `git clone` 兜底，但限流严重时同步会变慢。真被限流可把 cron 放宽（如 `*/30 * * * *`）。
+  - 绝大多数 run 都是「无变化、直接结束」，不产生空提交。
 - **`publishTimestamp` 取的是 commit 的 committer 时间**，不是「发布版本的时间」。
   上游 rebase / amend 会让它变化，于是 repin 判定会把该版本视作「目标变了」而重写最新条目
   —— 行为安全（只影响最新版本），但会让索引出现一次无意义改动。
