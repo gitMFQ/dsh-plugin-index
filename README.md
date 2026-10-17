@@ -17,6 +17,17 @@ https://raw.githubusercontent.com/gitMFQ/dsh-plugin-index/master/plugin-market.j
 https://cdn.jsdelivr.net/gh/gitMFQ/dsh-plugin-index@master/plugin-market.json
 ```
 
+> ⚠️ **镜像有 CDN 缓存，推送后会滞后。** 实测：本仓库推送新索引后，jsDelivr 的
+> `@master` 仍返回**上一版**内容（它按 URL 缓存，且 GitHub raw 自己也有约 5 分钟缓存）。
+> 想立刻生效就调它的清缓存接口（公开 GET，无需凭据）：
+>
+> ```
+> https://purge.jsdelivr.net/gh/gitMFQ/dsh-plugin-index@master/plugin-market.json
+> ```
+>
+> 清完可能仍拿到 GitHub raw 的旧副本，等约 5 分钟再清一次即可。
+> 对时效敏感就用上面的 **raw 主地址**（它是 CI 推送后最先更新的）。
+
 > ⚠️ **不要用带跳转的地址。** DSH 读取索引时用的是 `redirect: "error"`，
 > 遇到 302 直接判为失败，「发现」页只显示一条读取失败、不告诉你原因。
 > 实测：上面两个地址都是 **200 + 零跳转**；而 Gitee 的
