@@ -93,6 +93,12 @@ DSH 判断有没有新版本**只比 SemVer 字符串，从不看 commit**：
 同一版本核心只保留一条（`pruneBase`）：上游在同一版本号上又推了代码时，
 旧的 `0.2.0-rc.11` 与 `0.2.0-rc.11.commit.aaaaaaa` 都会被新 commit 取代，索引不会无限膨胀。
 
+**粘性与自动退场**：开关是「粘性」的 —— 索引里已经在用合成形态时，
+不带 `--commit-version` 的定时任务会**沿用**它（所以人工只需开一次，CI 不会冲掉）。
+但上游一旦**真的抬了版本号**（`rc.11` → `rc.12`），合成后缀会**自动退场**，
+索引回到干净的原生版本号，用户装完就能正常显示「已安装」。
+想手动关掉：`--commit-version never`（或手动触发时选「关闭」）。
+
 代价：本机 `package.json` 里的版本仍是 `0.2.0-rc.11`，与索引的 `0.2.0-rc.11.commit.xxx`
 永远不等，所以装完后「有新版本」提示**不会自动消失**。装一次即可，无害。
 想要干净的更新提示，仍应让上游抬版本号。
@@ -136,7 +142,7 @@ node scripts/update-index.mjs --check   # 有变化则退出码 1（给 CI / 脚
 | `--repo <url>` | 换上游仓库（只支持 `https://gitee.com/<owner>/<repo>`） |
 | `--out <path>` | 输出索引路径，默认 `plugin-market.json` |
 | `--no-repin` | 同版本不重定 commit |
-| `--commit-version [prerelease\|build]` | 把 commit 编进版本号，让「只改代码没抬版本号」也能点升级；不写形态时用 `prerelease` |
+| `--commit-version [prerelease\|build\|never]` | 把 commit 编进版本号，让「只改代码没抬版本号」也能点升级；不写形态时用 `prerelease`，`never` 显式关闭 |
 | `--engines <range>` | 显式指定 `engines.dsh`，覆盖自动推导 |
 | `--dry-run` | 只报告，不写文件 |
 | `--check` | 有变化则退出码 1 |

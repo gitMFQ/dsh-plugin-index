@@ -57,6 +57,7 @@ import {
   arg,
   buildVersionEntry,
   dshRangeFromPeers,
+  detectSyntheticStyle,
   flag,
   loadIndexDocument,
   mergeVersion,
@@ -157,15 +158,16 @@ const repoUrl = arg('repo', DEFAULT_REPO_URL)
 const out = resolve(arg('out', 'plugin-market.json'))
 const repin = !flag('no-repin')
 
-// `--commit-version`（可选形态：`--commit-version prerelease|build`，默认 prerelease）。
-// 不带该开关时版本号与上游完全一致（此时上游不抬版本号就点不了升级）。
+// `--commit-version`（可选形态：`--commit-version prerelease|build|never`，默认 prerelease）。
+// 不带该开关时，若索引里**已经在用**合成形态则沿用（粘性），否则保持上游原始版本号。
+// `never` 用于显式关掉：否则粘性会让它一直生效，没法手动退回。
 const styleIndex = process.argv.indexOf('--commit-version')
 const styleArg = styleIndex === -1 ? undefined : process.argv[styleIndex + 1]
 // 后面紧跟另一个开关（或没有值）时按默认形态处理，例如 `--commit-version --dry-run`。
-const commitVersion =
+const requestedStyle =
   styleIndex === -1 ? false : styleArg === undefined || styleArg.startsWith('--') ? 'prerelease' : styleArg
-if (commitVersion !== false && !['prerelease', 'build'].includes(commitVersion)) {
-  throw new Error(`--commit-version 只接受 prerelease 或 build，收到：${commitVersion}`)
+if (requestedStyle !== false && !['prerelease', 'build', 'never'].includes(requestedStyle)) {
+  throw new Error(`--commit-version 只接受 prerelease / build / never，收到：${requestedStyle}`)
 }
 
 const dryRun = flag('dry-run') || flag('check')
@@ -186,8 +188,28 @@ if (enginesDsh === '') {
   throw new Error('推导不出 engines.dsh（上游 peerDependencies 里没有 @deepseek-ai/dsh*），请用 --engines 显式指定')
 }
 
+const document = loadIndexDocument(out)
+const plugin = document.plugins.find((candidate) => candidate.name === remote.manifest.name)
+
+// 粘性：没显式指定形态时，沿用索引里已有的合成形态（让定时 CI 不会把手工打开的模式冲掉）。
+// 但**上游一旦抬了版本号**就自动退场：否则本机装回原始版本号后，索引仍挂着
+// `0.2.0-rc.11.commit.xxx`，「有新版本」徽标永不消失。抬版本后回到干净的原生版本号。
+const detected = detectSyntheticStyle(plugin?.versions ?? [])
+let commitVersion =
+  requestedStyle === false ? (detected === false ? false : detected.style) : requestedStyle === 'never' ? false : requestedStyle
+if (requestedStyle === 'never') {
+  console.log('  --commit-version never：显式关闭合成版本，回到上游原始版本号')
+} else if (requestedStyle === false && detected !== false) {
+  if (detected.base !== remote.manifest.version) {
+    console.log(`  上游版本号已从 ${detected.base} 抬到 ${remote.manifest.version}，合成后缀自动退场`)
+    commitVersion = false
+  } else {
+    console.log(`  沿用索引里已有的合成版本形态：${detected.style}（可用 --commit-version 覆盖）`)
+  }
+}
+
 const entry = buildVersionEntry({
-  // 打开 --commit-version 时，版本号编入 commit（只动版本字符串，commit 与时间戳照旧）。
+  // 打开合成模式时，版本号编入 commit（只动版本字符串，commit 与时间戳照旧）。
   version:
     commitVersion === false
       ? remote.manifest.version
@@ -198,12 +220,14 @@ const entry = buildVersionEntry({
   enginesDsh,
 })
 
-const document = loadIndexDocument(out)
-const plugin = document.plugins.find((candidate) => candidate.name === remote.manifest.name)
 const before = JSON.stringify(document)
 const { versions, action } = mergeVersion(plugin?.versions ?? [], entry, {
   repin,
-  pruneBase: commitVersion !== false,
+  // 同一版本核心只留一条，但**仅在合成模式相关时**才裁剪：
+  // - 正在用合成模式：清掉同核心的旧 commit 条目；
+  // - 正在关闭（never）或上游抬版本后自动退场：清掉同核心残留的合成条目。
+  // 全程没碰过合成模式的普通仓库保持原有「只追加、不改历史」的行为。
+  pruneBase: commitVersion !== false || detected !== false,
 })
 upsertPlugin(document, { manifest: remote.manifest, versions, repoUrl })
 const after = JSON.stringify(document)

@@ -27,9 +27,10 @@ on:
         description: 把 commit 编进版本号，让「只改代码没抬版本号」也能点升级
         required: false
         type: choice
-        default: 'never'
+        default: 自动
         options:
-          - never
+          - 自动
+          - 关闭
           - prerelease
           - build
 
@@ -63,16 +64,17 @@ jobs:
         env:
           INPUT_REPO: ${{ inputs.repo }}
           INPUT_NO_REPIN: ${{ inputs.no_repin }}
-          # 定时触发时 inputs 为空字符串，这里统一取默认 never（不改版本号）。
-          INPUT_COMMIT_VERSION: ${{ inputs.commit_version || 'never' }}
+          # 定时触发时 inputs 为空字符串；「自动」= 沿用索引里已有的形态（粘性），不传开关。
+          INPUT_COMMIT_VERSION: ${{ inputs.commit_version }}
         run: |
           args=(--out plugin-market.json --require-validator)
           if [ -n "$INPUT_REPO" ]; then args+=(--repo "$INPUT_REPO"); fi
           if [ "$INPUT_NO_REPIN" = "true" ]; then args+=(--no-repin); fi
-          # never = 不加 --commit-version，索引里保持上游原始版本号。
-          if [ "$INPUT_COMMIT_VERSION" = "prerelease" ] || [ "$INPUT_COMMIT_VERSION" = "build" ]; then
-            args+=(--commit-version "$INPUT_COMMIT_VERSION")
-          fi
+          # 自动 = 不加 --commit-version（由脚本按索引现状决定沿用还是退场）。
+          case "$INPUT_COMMIT_VERSION" in
+            prerelease|build) args+=(--commit-version "$INPUT_COMMIT_VERSION") ;;
+            关闭) args+=(--commit-version never) ;;
+          esac
           node scripts/update-index.mjs "${args[@]}"
 
       - name: 复核写出的索引

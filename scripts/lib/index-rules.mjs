@@ -187,6 +187,32 @@ export function syntheticVersion(version, commit, style = 'prerelease') {
 }
 
 /**
+ * 从既有 `versions[]` 里认出**当前正在用哪种合成形态**，以及它挂在哪个版本核心上。
+ *
+ * 用途：让 `--commit-version` 变成「粘性」的。定时 CI 只跑不带开关的
+ * `node scripts/update-index.mjs`，如果不做识别，它会把上游原始版本号写回去，
+ * 把手工打开的合成形态冲掉、索引里又会多出一条同版本号的普通条目。
+ * 认出形态后，不带开关的运行也会沿用，人工只需开一次。
+ *
+ * 同时返回 `base`，供调用方判断**上游是否已经抬了版本号**：
+ * 抬了就该让合成后缀自然退场，用户装完能回到干净的版本号
+ * （否则本机版本与索引的合成版本永远不等，「有新版本」徽标永不消失）。
+ *
+ * @param versions - 现有 `versions[]`。
+ * @returns `{ style, base }`；索引里没有合成版本时返回 `false`。
+ */
+export function detectSyntheticStyle(versions) {
+  for (const version of versions) {
+    if (typeof version?.version !== 'string') continue
+    const dotted = /^(.+?)\.commit\.[0-9a-f]{4,40}$/u.exec(version.version)
+    if (dotted !== null) return { style: 'prerelease', base: dotted[1] }
+    const built = /^(.+?)\+.*commit\.[0-9a-f]{4,40}$/u.exec(version.version)
+    if (built !== null) return { style: 'build', base: built[1] }
+  }
+  return false
+}
+
+/**
  * 构造一个版本条目。
  *
  * @param entry - `version` / `publishTimestamp` / `commit` / `repoUrl` / `enginesDsh`。
