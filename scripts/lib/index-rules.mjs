@@ -9,6 +9,8 @@
  * - `engines.dsh` 必须是 `@deepseek-ai/dsh*` peer 的**枚举并集**，不能写成 `^0.1.2-rc.1` 这类简写：
  *   简写会顺带放行同主版本下**从未验证过**的版本，而它是「发现」页决定安装按钮可不可用的唯一判据。
  * - `source.commit` 必须是**完整 40 位小写 commit**。
+ * - `version` 必须是上游 `package.json` 的**原值**：不写 `+commit.xxxxxxx` 之类的合成后缀，
+ *   安装目标由 `source.commit` 表达（理由见 `update-index.mjs` 顶部与 docs/ci-sync.md）。
  * - 索引条目一旦发布就不应被悄悄改写：同版本重定 commit（repin）是显式开关，且只作用于**最新版本**。
  */
 import { execFileSync } from 'node:child_process'
@@ -28,8 +30,8 @@ const INDEX_URL = 'https://example.invalid/plugin-market.json'
 const TITLE = { en: 'Jet Hub Plugins', zh: 'Jet Hub 插件源' }
 
 const DESCRIPTION = {
-  en: 'Plugins maintained in the deepseek-harness-codearts repository. Git sources are pinned to full commits.',
-  zh: 'deepseek-harness-codearts 仓库维护的插件。Git 来源固定到完整 commit。',
+  en: 'Plugins maintained in the deepseek-harness-codearts repository. Git sources are pinned to a full commit, re-resolved to the upstream HEAD on every sync.',
+  zh: 'deepseek-harness-codearts 仓库维护的插件。Git 来源固定到完整 commit，每次同步重定到上游最新提交。',
 }
 
 const METADATA = {
@@ -131,85 +133,23 @@ function sortVersionsDescending(versions) {
 }
 
 /**
- * 去掉合成 commit 标记，得到上游的「版本核心」。
+ * 判断版本号是不是**历史遗留的合成版本**：`0.2.0-rc.11.commit.7a3b64a`（点号）
+ * 或 `0.2.0-rc.11+commit.7a3b64a`（build metadata）。
  *
- * 同时认得两种合成形态：`0.2.0-rc.11.commit.7a3b64a`（点号）与 `0.2.0-rc.11+commit.7a3b64a`（build metadata）。
- * 上游自己写了 build metadata（如 `1.0.0+nightly`）时，点号形态会把整串当核心保留。
+ * 这两种形态是索引早期「把 commit 编进版本号，好让只改代码也能点升级」的产物，现已**废弃**：
+ * 版本号一律写上游 `package.json` 的原值，安装目标由 `source.commit` 表达。
+ * 本函数只用于**清理**索引里已经留下的合成条目 —— 合成版本按 SemVer 大于同核心的原生版本，
+ * 留着会让「发现」页永远显示一个装不掉的「有新版本」。
+ *
+ * 上游自己发过 `x.y.z+commit.abcdef1` 这类 build metadata 时，它作为**当前条目**会被照常写入
+ * （`mergeVersion` 末尾会把 entry 补回），只可能在版本核心被顶替后按「同核心只留一条」清掉。
+ *
+ * @param version - 索引里的版本字符串。
+ * @returns 是合成形态则为 `true`。
  */
-export function baseVersionOf(version) {
-  const dotted = /^(.+?)\.commit\.[0-9a-f]{4,40}$/u.exec(version)
-  if (dotted !== null) return dotted[1]
-  const at = version.indexOf('+')
-  return at === -1 ? version : version.slice(0, at)
-}
-
-/**
- * 把 commit 编进版本号，让「commit 不同」也能点升级。
- *
- * **动机**：DSH 判断有没有新版本只比 SemVer 字符串，**从不看 commit**
- * （市场卡片徽标是 `semver.gt(索引版本, 已安装版本)`；版本行的「安装」按钮是
- * `installedVersion === version.version` 的**字符串**相等判断）。
- * 所以上游只改代码、不抬版本号时，本机 `0.2.0-rc.11` 和索引 `0.2.0-rc.11` 完全相等，
- * 按钮根本不出现——这是本次改造要解决的唯一问题。
- *
- * **两种形态**（`style`）：
- * - `'prerelease'`（默认）→ `0.2.0-rc.11.commit.7a3b64a`
- *   prerelease 按点切开是 `["rc","11","commit","7a3b64a"]`，
- *   因为第 3 段多了标识符，所以**大于** `0.2.0-rc.11`（徽标显示「有新版本」），
- *   又因为第 2 段 `11` < `12`，所以**小于**上游未来的 `0.2.0-rc.12`，不会盖住真版本。
- * - `'build'` → `0.2.0-rc.11+commit.7a3b64a`
- *   build metadata 按规范**不参与优先级比较**，天生压不住任何版本，最保守；
- *   代价是 `semver.gt` 恒为 false，卡片徽标只显示「已安装」，得点进详情页才看到安装按钮。
- *
- * **绝对不能用**连字符形态 `0.2.0-rc.11-7a3b64a`：prerelease 会被切成 `["rc","11-7a3b64a"]`，
- * 而 SemVer 规定**纯数字标识符优先级低于含字母标识符**，于是 `11-7a3b64a` **大于** `12`，
- * 合成版本会永久压住上游未来的真版本，索引里永远选中旧的那条。
- *
- * @param version - 上游 `package.json` 里的版本。
- * @param commit - 完整 40 位 commit；只取前 7 位写进版本号（完整值仍在 `source.commit` 里）。
- * @param style - `'prerelease'`（默认）或 `'build'`。
- * @returns 合成后的版本字符串；上游自带 build metadata 时追加而不是覆盖。
- */
-export function syntheticVersion(version, commit, style = 'prerelease') {
-  if (style !== 'prerelease' && style !== 'build') {
-    throw new Error(`未知的合成版本形态：${style}（应为 prerelease 或 build）`)
-  }
-  const at = version.indexOf('+')
-  const base = at === -1 ? version : version.slice(0, at)
-  const existing = at === -1 ? '' : version.slice(at + 1)
-  const short = commit.slice(0, 7)
-  if (style === 'build') {
-    const tag = `commit.${short}`
-    return `${base}+${existing === '' ? tag : `${existing}.${tag}`}`
-  }
-  // 点号形态：上游自带 build metadata 时把 `+` 换成 `.`，避免把 `+` 放进 prerelease 段。
-  return existing === '' ? `${base}.commit.${short}` : `${base}.${existing}.commit.${short}`
-}
-
-/**
- * 从既有 `versions[]` 里认出**当前正在用哪种合成形态**，以及它挂在哪个版本核心上。
- *
- * 用途：让 `--commit-version` 变成「粘性」的。定时 CI 只跑不带开关的
- * `node scripts/update-index.mjs`，如果不做识别，它会把上游原始版本号写回去，
- * 把手工打开的合成形态冲掉、索引里又会多出一条同版本号的普通条目。
- * 认出形态后，不带开关的运行也会沿用，人工只需开一次。
- *
- * 同时返回 `base`，供调用方判断**上游是否已经抬了版本号**：
- * 抬了就该让合成后缀自然退场，用户装完能回到干净的版本号
- * （否则本机版本与索引的合成版本永远不等，「有新版本」徽标永不消失）。
- *
- * @param versions - 现有 `versions[]`。
- * @returns `{ style, base }`；索引里没有合成版本时返回 `false`。
- */
-export function detectSyntheticStyle(versions) {
-  for (const version of versions) {
-    if (typeof version?.version !== 'string') continue
-    const dotted = /^(.+?)\.commit\.[0-9a-f]{4,40}$/u.exec(version.version)
-    if (dotted !== null) return { style: 'prerelease', base: dotted[1] }
-    const built = /^(.+?)\+.*commit\.[0-9a-f]{4,40}$/u.exec(version.version)
-    if (built !== null) return { style: 'build', base: built[1] }
-  }
-  return false
+export function isSyntheticVersion(version) {
+  if (typeof version !== 'string') return false
+  return /^.+?\.commit\.[0-9a-f]{4,40}$/u.test(version) || /^.+?\+.*commit\.[0-9a-f]{4,40}$/u.test(version)
 }
 
 /**
@@ -231,35 +171,27 @@ export function buildVersionEntry({ version, publishTimestamp, commit, repoUrl, 
  * 把一个新条目并入既有 `versions[]`。
  *
  * 四种结局：
- * - `appended`：该 version 尚不存在 → 追加（「发现」页会显示「有新版本」）；
- * - `repinned`：该 version 已存在、且是**最新版本**，但 commit/时间戳变了 → 改写这一个条目；
- * - `replaced`：`--commit-version` 模式下，同一 commit 核心的旧合成版本被新 commit 顶掉；
+ * - `appended`：该 version 尚不存在 → 追加（上游抬版本号时就是它，「发现」页显示「有新版本」）；
+ * - `repinned`：该 version 已存在、且是**最新版本**，但 commit/时间戳变了 → 改写这一个条目。
+ *   上游「只改代码不抬版本号」时靠它把安装目标跟到最新提交 —— 新装（或点「安装」）拿到的仍是最新代码；
+ * - `replaced`：顺带清掉了索引里**历史遗留的合成版本**条目（见 `isSyntheticVersion`）；
  * - `kept` / `unchanged`：保持不动（同 version 且非最新版本的历史条目**不可变**）。
  *
  * @param existing - 现有 `versions[]`（可为空数组）。
- * @param entry - `buildVersionEntry()` 的产物。
+ * @param entry - `buildVersionEntry()` 的产物；`version` 必须是上游原值。
  * @param options.repin - 是否允许同版本重定 commit，默认允许。
- * @param options.pruneBase - 是否清掉「同一版本核心、但 commit 已被顶替」的旧合成条目
- *   （`--commit-version` 模式用，避免索引无限增长）。
  * @returns `{ versions, action }`；`versions` 已按 SemVer 降序排列。
  */
-export function mergeVersion(existing, entry, { repin = true, pruneBase = false } = {}) {
+export function mergeVersion(existing, entry, { repin = true } = {}) {
   let versions = existing.map((version) => structuredClone(version))
 
-  // 合成版本模式下，同一版本核心只保留**目标那一条**：
-  // 上游在 `0.2.0-rc.11` 上又推了代码时，旧的 `0.2.0-rc.11` 与
-  // `0.2.0-rc.11.commit.aaaaaaa` 都会被 `0.2.0-rc.11.commit.bbbbbbb` 取代。
-  // 判据是「版本核心相同、但版本字符串不同」——同一版本号留两条没有意义，
-  // 而核心不同的历史版本（如未来的 `0.2.0-rc.12`）照旧保留。
-  let replaced = false
-  if (pruneBase) {
-    const base = baseVersionOf(entry.version)
-    const before = versions.length
-    versions = versions.filter(
-      (version) => baseVersionOf(version.version) !== base || version.version === entry.version,
-    )
-    replaced = versions.length !== before
-  }
+  // 版本号里不再编 commit，但索引里可能还留着早期写法留下的合成条目
+  // （`0.2.0-rc.11.commit.aaaaaaa`）。它按 SemVer 大于同核心的原生版本，
+  // 留着会让「发现」页永远显示一个装不掉的「有新版本」，所以同步时顺手清掉。
+  // 安装目标本来就写在 `source.commit` 里，一条原生条目足够表达。
+  const before = versions.length
+  versions = versions.filter((version) => !isSyntheticVersion(version.version))
+  const replaced = versions.length !== before
 
   const at = versions.findIndex((version) => version.version === entry.version)
 

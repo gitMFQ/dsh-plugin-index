@@ -8,46 +8,37 @@
  *   两者共用 `scripts/lib/index-rules.mjs` 的构建规则，结果可互相叠加。
  *
  * 关键行为（决定了「发现」页会怎么显示）：
+ * - **版本号只写上游原值**：`version` 恒等于远端 `package.json` 里的字符串，
+ *   **绝不把 commit 编进版本号**（早期试过 `0.2.0-rc.11.commit.15f2a79`，已废弃，理由见下）。
+ * - **重定 commit（repin）**：版本号没变、但最新版本对应的 commit 变了 → 改写**最新那一条**的
+ *   commit 与时间戳。于是索引里的安装目标**始终是上游最新提交**：新装（或点「安装」）拿到的
+ *   就是最新代码，不管上游抬没抬版本号。历史版本条目**永不改写**（索引一旦发布就不该被悄悄改变）。
  * - **追加**：远端 `package.json` 的 `version` 在索引里不存在 → 追加一条。
  *   DSH 的「更新」判据是 **SemVer 比较**（`semver.gt(索引版本, 已安装版本)`），
- *   所以只有上游**真的抬了版本号**，用户才会看到「有新版本」。
- * - **重定 commit（repin）**：版本号没变、但最新版本对应的 commit 变了 → 改写**最新那一条**的
- *   commit 与时间戳。这样上游「只改代码不抬版本号」时，新装用户仍能拿到最新代码。
- *   历史版本条目**永不改写**（索引一旦发布就不该被悄悄改变）。
- * - 用 `--no-repin` 可关掉重定行为，只认版本号变化。
+ *   所以只有上游**真的抬了版本号**，已安装的用户才会看到「有新版本」。
+ * - 用 `--no-repin` 可关掉重定行为：安装目标会冻结在索引里现有的 commit。
+ *
+ * 版本号里为什么不写 commit
+ * -------------------------
+ * DSH 判断「有没有新版本」**只比 SemVer 字符串，从不看 commit**
+ * （卡片徽标是 `semver.gt(索引版本, 已安装版本)`，版本行「安装」按钮是
+ * `installedVersion !== version.version` 的**字符串**比较）。把 commit 编进版本号
+ * 确实能骗出一个可点的按钮，但代价是：
+ * - 本机 `package.json` 里的版本仍是 `0.2.0-rc.11`，与索引版本**永不相等**，
+ *   装完「有新版本」徽标不会消失 —— 是个永远装不掉的假更新；
+ * - 版本号不再是上游发布的值，对版本、排查问题都得先去掉后缀。
+ * 所以这里选择**版本号保持干净 + 安装目标跟随最新提交**：更新提示只在
+ * **上游抬版本号**时出现；上游不抬版本号时，新装用户照样直接装到最新提交。
+ * 需要老用户也看到提示时，正解是让上游抬版本号，而不是在索引里造版本号。
+ *
+ * 索引里若还留着历史的合成版本条目（`0.2.0-rc.11.commit.xxxxxxx`），同步时会自动清掉。
  *
  * 用法（在索引仓库根目录执行）：
  *   node scripts/update-index.mjs                 # 写入 plugin-market.json
  *   node scripts/update-index.mjs --dry-run       # 只报告，不写文件
  *   node scripts/update-index.mjs --check         # 有变化则退出码 1（给 CI 做门禁用）
  *   node scripts/update-index.mjs --repo <url>    # 换上游仓库
- *   node scripts/update-index.mjs --no-repin      # 不重定同版本的 commit
- *   node scripts/update-index.mjs --commit-version              # 把 commit 编进版本号（默认 prerelease 形态）
- *   node scripts/update-index.mjs --commit-version build        # 用 build metadata 形态（更保守）
- *
- * `--commit-version`：让「commit 不同」也能点升级
- * ---------------------------------------------
- * DSH 判断「有没有新版本」**只比 SemVer 字符串，永远不看 commit**：
- * 卡片徽标是 `semver.gt(索引版本, 已安装版本)`，版本行「安装」按钮是
- * `installedVersion !== version.version` 的**字符串**比较。
- * 所以上游只改代码、不抬版本号时，索引版本 == 已安装版本，按钮根本不出现。
- *
- * 打开本开关后，版本写成下面两种形态之一（详细对比见 docs/ci-sync.md）：
- * - `prerelease`（默认）：`0.2.0-rc.11.commit.15f2a79`
- *   大于 `rc.11`（徽标显示「有新版本」），又小于上游未来的 `rc.12`（不压住真版本）。
- * - `build`：`0.2.0-rc.11+commit.15f2a79`
- *   build metadata 按 SemVer 规范不参与优先级比较，天生压不住任何版本，最保守；
- *   代价是 `semver.gt` 恒为 false，卡片徽标只显示「已安装」，得点进详情页才看到安装按钮。
- *
- * **绝不要**用连字符形态 `0.2.0-rc.11-15f2a79`：prerelease 会切成 `["rc","11-15f2a79"]`，
- * 而纯数字标识符优先级低于含字母标识符，`11-15f2a79` **大于** `12`，
- * 合成版本会永久压住上游未来的真版本。
- *
- * 同一版本核心只保留最新那条（pruneBase），上游反复推送不会让索引无限膨胀。
- *
- * 代价（说清楚才好决定要不要开）：本机装的 `package.json` 里版本仍是 `0.2.0-rc.11`，
- * 与索引的合成版本永远不等，所以「有新版本」提示在装完后**不会自动消失**，
- * 装一次即可，是无害的重复安装。想要干净的更新提示，仍应让上游抬版本号。
+ *   node scripts/update-index.mjs --no-repin      # 不重定同版本的 commit（安装目标冻结）
  */
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -57,12 +48,10 @@ import {
   arg,
   buildVersionEntry,
   dshRangeFromPeers,
-  detectSyntheticStyle,
   flag,
   loadIndexDocument,
   mergeVersion,
   readCheckout,
-  syntheticVersion,
   upsertPlugin,
   validateIndex,
 } from './lib/index-rules.mjs'
@@ -158,18 +147,6 @@ const repoUrl = arg('repo', DEFAULT_REPO_URL)
 const out = resolve(arg('out', 'plugin-market.json'))
 const repin = !flag('no-repin')
 
-// `--commit-version`（可选形态：`--commit-version prerelease|build|never`，默认 prerelease）。
-// 不带该开关时，若索引里**已经在用**合成形态则沿用（粘性），否则保持上游原始版本号。
-// `never` 用于显式关掉：否则粘性会让它一直生效，没法手动退回。
-const styleIndex = process.argv.indexOf('--commit-version')
-const styleArg = styleIndex === -1 ? undefined : process.argv[styleIndex + 1]
-// 后面紧跟另一个开关（或没有值）时按默认形态处理，例如 `--commit-version --dry-run`。
-const requestedStyle =
-  styleIndex === -1 ? false : styleArg === undefined || styleArg.startsWith('--') ? 'prerelease' : styleArg
-if (requestedStyle !== false && !['prerelease', 'build', 'never'].includes(requestedStyle)) {
-  throw new Error(`--commit-version 只接受 prerelease / build / never，收到：${requestedStyle}`)
-}
-
 const dryRun = flag('dry-run') || flag('check')
 
 // 索引里的 source.url / homepage 必须是 https 仓库地址（format 1 会拒绝 file:// 等形态），
@@ -191,29 +168,10 @@ if (enginesDsh === '') {
 const document = loadIndexDocument(out)
 const plugin = document.plugins.find((candidate) => candidate.name === remote.manifest.name)
 
-// 粘性：没显式指定形态时，沿用索引里已有的合成形态（让定时 CI 不会把手工打开的模式冲掉）。
-// 但**上游一旦抬了版本号**就自动退场：否则本机装回原始版本号后，索引仍挂着
-// `0.2.0-rc.11.commit.xxx`，「有新版本」徽标永不消失。抬版本后回到干净的原生版本号。
-const detected = detectSyntheticStyle(plugin?.versions ?? [])
-let commitVersion =
-  requestedStyle === false ? (detected === false ? false : detected.style) : requestedStyle === 'never' ? false : requestedStyle
-if (requestedStyle === 'never') {
-  console.log('  --commit-version never：显式关闭合成版本，回到上游原始版本号')
-} else if (requestedStyle === false && detected !== false) {
-  if (detected.base !== remote.manifest.version) {
-    console.log(`  上游版本号已从 ${detected.base} 抬到 ${remote.manifest.version}，合成后缀自动退场`)
-    commitVersion = false
-  } else {
-    console.log(`  沿用索引里已有的合成版本形态：${detected.style}（可用 --commit-version 覆盖）`)
-  }
-}
-
 const entry = buildVersionEntry({
-  // 打开合成模式时，版本号编入 commit（只动版本字符串，commit 与时间戳照旧）。
-  version:
-    commitVersion === false
-      ? remote.manifest.version
-      : syntheticVersion(remote.manifest.version, remote.commit, commitVersion),
+  // 版本号恒为上游 `package.json` 的原值：commit 只写在 `source.commit` 里，
+  // 安装目标由它表达（每次同步都会重定到上游最新提交，见文件头「为什么不写 commit」）。
+  version: remote.manifest.version,
   publishTimestamp: remote.publishTimestamp,
   commit: remote.commit,
   repoUrl,
@@ -221,20 +179,16 @@ const entry = buildVersionEntry({
 })
 
 const before = JSON.stringify(document)
-const { versions, action } = mergeVersion(plugin?.versions ?? [], entry, {
-  repin,
-  // 同一版本核心只留一条，但**仅在合成模式相关时**才裁剪：
-  // - 正在用合成模式：清掉同核心的旧 commit 条目；
-  // - 正在关闭（never）或上游抬版本后自动退场：清掉同核心残留的合成条目。
-  // 全程没碰过合成模式的普通仓库保持原有「只追加、不改历史」的行为。
-  pruneBase: commitVersion !== false || detected !== false,
-})
+const { versions, action } = mergeVersion(plugin?.versions ?? [], entry, { repin })
 upsertPlugin(document, { manifest: remote.manifest, versions, repoUrl })
 const after = JSON.stringify(document)
 
 await validateIndex(document, { require: flag('require-validator') })
 console.log(`  engines.dsh = ${enginesDsh}`)
 console.log(`  版本条目 ${action}，共 ${versions.length} 个版本`)
+if (action === 'replaced') {
+  console.log('  已清掉索引里历史遗留的合成版本条目（版本号不再编入 commit）')
+}
 
 const changed = before !== after
 if (!changed) {
