@@ -20,7 +20,8 @@
  *   node scripts/update-index.mjs                 # 写入 plugin-market.json
  *   node scripts/update-index.mjs --dry-run       # 只报告，不写文件
  *   node scripts/update-index.mjs --check         # 有变化则退出码 1（给 CI 做门禁用）
- *   node scripts/update-index.mjs --repo <url>    # 换上游仓库
+ *   node scripts/update-index.mjs --repo <url>    # 换上游仓库（检测与安装来源一起换）
+ *   node scripts/update-index.mjs --detect-repo <url>  # 只换「检测」源，安装来源仍写 --repo
  *   node scripts/update-index.mjs --no-repin      # 不重定同版本的 commit
  *   node scripts/update-index.mjs --commit-version              # 把 commit 编进版本号（默认 prerelease 形态）
  *   node scripts/update-index.mjs --commit-version build        # 用 build metadata 形态（更保守）
@@ -45,6 +46,23 @@
  *
  * 同一版本核心只保留最新那条（pruneBase），上游反复推送不会让索引无限膨胀。
  *
+ * 检测源与安装来源可以分开：`--detect-repo`
+ * -----------------------------------------
+ * 上游主仓库在 Gitee，另有一个 commit 完全一致的 GitHub 镜像
+ * （`iJetLi/dsh-providers-hub`）。两个地址指向同一份代码，所以可以
+ * **从任一源「检测」新版本，却仍按 `--repo` 写「安装来源」**：
+ *
+ *   node scripts/update-index.mjs \
+ *     --repo https://gitee.com/iJetLi/deepseek-harness-codearts \
+ *     --detect-repo https://github.com/iJetLi/dsh-providers-hub
+ *
+ * 这样镜像只当检测通道（API 更稳、更快），索引里每个版本的 `source.url` 仍是 Gitee，
+ * 历史条目一个字都不用改，国内用户也不会被迫走 GitHub clone。
+ *
+ * ⚠️ 两个源的 commit 必须一致才有意义。脚本**不做**一致性比对（那要多打一次 API），
+ * 但会把检测到的 commit 打印出来；怀疑镜像落后时用
+ * `git ls-remote` 或 `curl` 各自对一下 `master` 的 sha 即可。
+ *
  * 代价（说清楚才好决定要不要开）：本机装的 `package.json` 里版本仍是 `0.2.0-rc.11`，
  * 与索引的合成版本永远不等，所以「有新版本」提示在装完后**不会自动消失**，
  * 装一次即可，是无害的重复安装。想要干净的更新提示，仍应让上游抬版本号。
@@ -61,100 +79,15 @@ import {
   flag,
   loadIndexDocument,
   mergeVersion,
-  readCheckout,
   syntheticVersion,
   upsertPlugin,
   validateIndex,
 } from './lib/index-rules.mjs'
+import { assertRepoUrl, readRemote } from './lib/remote.mjs'
 
-const RETRIES = 3
-const RETRY_DELAY_MS = 3000
-
-const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
-
-/** 带重试的 JSON GET；Gitee 偶发 5xx / 限流时不要让整个 job 红。 */
-async function fetchJson(url, { retries = RETRIES } = {}) {
-  let last
-  for (let attempt = 1; attempt <= retries; attempt += 1) {
-    try {
-      const response = await fetch(url, {
-        headers: { accept: 'application/json', 'user-agent': 'dsh-plugin-index-sync' },
-        signal: AbortSignal.timeout(30_000),
-      })
-      if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`)
-      return await response.json()
-    } catch (error) {
-      last = error
-      console.error(`  ! ${url} 第 ${attempt}/${retries} 次失败：${error.message}`)
-      if (attempt < retries) await sleep(RETRY_DELAY_MS * attempt)
-    }
-  }
-  throw new Error(`读取失败：${url}（${last?.message}）`)
-}
-
-/** `https://gitee.com/owner/repo` → `owner/repo`；不是 Gitee 地址时返回 undefined。 */
-function giteeSlug(repoUrl) {
-  const matched = /^https:\/\/gitee\.com\/([^/]+\/[^/]+?)(?:\.git)?$/u.exec(repoUrl.trim())
-  return matched?.[1]
-}
-
-/**
- * 读取远端仓库最新 commit 及其 `package.json`。
- *
- * Gitee 地址优先走 OpenAPI（一次拿到 sha + committer 日期 + 指定 commit 的文件内容，无需 clone，
- * 实测约 2 s；clone `--depth 1` 约 10 s / 25 MB）；其余情况或 API 失败时回落到 `git clone --depth 1`。
- *
- * @returns `{ manifest, commit, publishTimestamp, message }`。
- */
-async function readRemote(repoUrl) {
-  const slug = giteeSlug(repoUrl)
-  if (slug === undefined) {
-    console.log('  非 Gitee 地址，直接用 git clone 读取')
-    return readRemoteByClone(repoUrl)
-  }
-  const api = `https://gitee.com/api/v5/repos/${slug}`
-
-  try {
-    const commits = await fetchJson(`${api}/commits?per_page=1`)
-    const head = commits?.[0]
-    if (head?.sha === undefined) throw new Error('commits 接口没有返回 sha')
-    const contents = await fetchJson(`${api}/contents/package.json?ref=${head.sha}`)
-    if (contents?.content === undefined) throw new Error('contents 接口没有返回内容')
-    const manifest = JSON.parse(Buffer.from(contents.content, 'base64').toString('utf8'))
-    const date = head.commit?.committer?.date ?? head.commit?.author?.date
-    const publishTimestamp = Math.floor(new Date(date).getTime() / 1000)
-    if (!Number.isInteger(publishTimestamp)) throw new Error(`解析不出 commit 时间：${date}`)
-    return {
-      manifest,
-      commit: head.sha,
-      publishTimestamp,
-      message: (head.commit?.message ?? '').split('\n')[0],
-    }
-  } catch (error) {
-    console.error(`  ! Gitee API 不可用（${error.message}），回落到 git clone`)
-  }
-
-  return readRemoteByClone(repoUrl)
-}
-
-/** 兜底路径：`git clone --depth 1` 后按本地 HEAD 读。 */
-async function readRemoteByClone(repoUrl) {
-  const { mkdtempSync } = await import('node:fs')
-  const { tmpdir } = await import('node:os')
-  const { execFileSync } = await import('node:child_process')
-  const directory = mkdtempSync(resolve(tmpdir(), 'dsh-plugin-sync-'))
-  execFileSync('git', ['clone', '--depth', '1', '--single-branch', repoUrl, directory], {
-    stdio: 'inherit',
-  })
-  const { manifest, commit, publishTimestamp } = readCheckout(directory)
-  const message = execFileSync('git', ['show', '-s', '--format=%s', 'HEAD'], {
-    cwd: directory,
-    encoding: 'utf8',
-  }).trim()
-  return { manifest, commit, publishTimestamp, message }
-}
-
-const repoUrl = arg('repo', DEFAULT_REPO_URL)
+const repoUrl = assertRepoUrl(arg('repo', DEFAULT_REPO_URL), '--repo ')
+// 检测源：默认与安装来源同一个仓库；可指向 commit 完全一致的镜像（见文件头的 `--detect-repo`）。
+const detectRepoUrl = assertRepoUrl(arg('detect-repo', repoUrl), '--detect-repo ')
 const out = resolve(arg('out', 'plugin-market.json'))
 const repin = !flag('no-repin')
 
@@ -172,14 +105,17 @@ if (requestedStyle !== false && !['prerelease', 'build', 'never'].includes(reque
 
 const dryRun = flag('dry-run') || flag('check')
 
-// 索引里的 source.url / homepage 必须是 https 仓库地址（format 1 会拒绝 file:// 等形态），
-// 提前拦掉，避免跑完一轮才发现校验不过。
-if (!/^https:\/\/[^\s]+$/u.test(repoUrl) || !repoUrl.includes('/', 'https://'.length)) {
-  throw new Error(`--repo 必须是 https 仓库地址：${repoUrl}`)
+console.log(`安装来源（写进索引 source.url）${repoUrl}`)
+let fallbackUrl
+if (detectRepoUrl === repoUrl) {
+  console.log(`检测源（读最新 commit）${detectRepoUrl}`)
+} else {
+  // 两个地址指向同一份代码时才有意义：镜像落后会让索引钉到旧 commit 上。
+  // 镜像整站不可达时退回安装来源（Gitee）检测 —— 两者 commit 一致，结果等价。
+  console.log(`检测源（读最新 commit）${detectRepoUrl}  ← 与安装来源不同，请确认两者 commit 一致`)
+  fallbackUrl = repoUrl
 }
-
-console.log(`上游仓库 ${repoUrl}`)
-const remote = await readRemote(repoUrl)
+const remote = await readRemote(detectRepoUrl, { fallbackUrl })
 console.log(`  最新 commit ${remote.commit}`)
 console.log(`  ${remote.manifest.name}@${remote.manifest.version}  ${remote.message}`)
 

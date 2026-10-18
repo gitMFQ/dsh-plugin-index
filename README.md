@@ -45,6 +45,10 @@ https://cdn.jsdelivr.net/gh/gitMFQ/dsh-plugin-index@master/plugin-market.json
 来源是 `https://gitee.com/iJetLi/deepseek-harness-codearts`，每个版本都锁定到
 **完整 40 位 commit**，不是浮动分支 —— 索引一旦发布就不会被上游推进悄悄改变。
 
+> 上游另有内容一致的 GitHub 镜像 [`iJetLi/dsh-providers-hub`](https://github.com/iJetLi/dsh-providers-hub)
+> （同一批 commit、同 40 位 SHA）。CI **从镜像检测**新版本（API 更稳），
+> 但索引里写的**安装来源仍是 Gitee** —— 国内安装速度不受影响，历史条目也不变。
+
 ## 索引格式要点
 
 DSH 的索引是一个 JSON 文件，`format: 1`，顶层字段：
@@ -80,10 +84,19 @@ DSH 的索引是一个 JSON 文件，`format: 1`，顶层字段：
 
 ### 自动（推荐）：GitHub Actions 定时同步
 
-`.github/workflows/sync-plugin-index.yml` 每 10 分钟主动去读上游 Gitee 仓库的最新 commit，
+`.github/workflows/sync-plugin-index.yml` 每 10 分钟主动去读上游仓库的最新 commit，
 有新版本就更新索引并提交回本仓库。**不需要在上游放任何凭据。**
 
-也可以在 **Actions → sync-plugin-index → Run workflow** 手动触发。
+检测与安装分两个地址（都可在手动触发时覆盖）：
+
+| 角色 | 默认地址 | 作用 |
+|---|---|---|
+| 检测源 | `github.com/iJetLi/dsh-providers-hub`（镜像） | 读最新 commit 与 `package.json` |
+| 安装来源 | `gitee.com/iJetLi/deepseek-harness-codearts` | 写进索引的 `source.url` |
+
+两者 commit 完全一致，所以只换检测通道不会改变任何已发布的条目。
+镜像整站不可达时会自动退回主仓库检测。也可以在 **Actions → sync-plugin-index → Run workflow**
+手动触发。
 
 ⚠️ 一个必须知道的语义：**DSH 判断「有没有新版本」用的是 SemVer 比较，不是 commit 比较**。
 所以只有上游**真的抬了版本号**，已安装的用户才会看到「有新版本」；上游只改代码不抬版本号时，
@@ -104,15 +117,31 @@ node ../dsh-plugin-index/scripts/generate-index.mjs --out ../dsh-plugin-index/pl
 ```
 
 脚本会读取插件仓库的 `package.json` 与 `HEAD`，把该 commit 并入索引并推导 `engines.dsh`。
+在 **GitHub 镜像仓库**里跑时记得显式指定安装来源，否则 `source.url` 会写成 GitHub：
+
+```sh
+node ../dsh-plugin-index/scripts/generate-index.mjs \
+  --repo https://gitee.com/iJetLi/deepseek-harness-codearts \
+  --out ../dsh-plugin-index/plugin-market.json
+```
 
 ### 常用命令（在索引仓库里）
 
 ```sh
 npm install            # 只装官方校验器
-npm run sync:dry       # 看会怎么改，不写文件
+npm run sync:dry       # 看会怎么改，不写文件（已默认走 GitHub 镜像检测）
 npm run sync           # 写 plugin-market.json
 npm run sync:commit-version   # 同 sync，但把 commit 编进版本号（让只改代码也能点升级）
 npm run validate       # 只校验现有索引
+```
+
+三个 `sync*` 脚本都默认带 `--detect-repo https://github.com/iJetLi/dsh-providers-hub`，
+即**从镜像检测、按 Gitee 写安装来源**（与 CI 完全一致）。想临时改检测源就直接调脚本：
+
+```sh
+node scripts/update-index.mjs --dry-run \
+  --repo        https://gitee.com/iJetLi/deepseek-harness-codearts \
+  --detect-repo https://gitee.com/iJetLi/deepseek-harness-codearts   # 完全回退到只读 Gitee
 ```
 
 ## 校验

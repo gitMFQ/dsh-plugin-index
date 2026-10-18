@@ -5,9 +5,9 @@
   "description": "DSH (DeepSeek Harness) plugin market index — format 1, sources pinned to full commits",
   "type": "module",
   "scripts": {
-    "sync": "node scripts/update-index.mjs",
-    "sync:dry": "node scripts/update-index.mjs --dry-run",
-    "sync:commit-version": "node scripts/update-index.mjs --commit-version",
+    "sync": "node scripts/update-index.mjs --detect-repo https://github.com/iJetLi/dsh-providers-hub",
+    "sync:dry": "node scripts/update-index.mjs --dry-run --detect-repo https://github.com/iJetLi/dsh-providers-hub",
+    "sync:commit-version": "node scripts/update-index.mjs --commit-version --detect-repo https://github.com/iJetLi/dsh-providers-hub",
     "validate": "node scripts/validate-index.mjs"
   },
   "devDependencies": {

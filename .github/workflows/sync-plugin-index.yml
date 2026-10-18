@@ -1,10 +1,17 @@
 name: sync-plugin-index
 
-# 定时从**上游插件仓库**（Gitee）拉取最新 commit，把新版本并入 plugin-market.json 并提交回本仓库。
+# 定时从**上游插件仓库**拉取最新 commit，把新版本并入 plugin-market.json 并提交回本仓库。
 #
 # 为什么是「拉」而不是让上游「推」：上游在 Gitee，本索引在 GitHub，
-# 用 GitHub 托管 runner 主动去读 Gitee 是最省事、也不需要在上游放任何凭据的做法。
+# 用 GitHub 托管 runner 主动去读上游是最省事、也不需要在上游放任何凭据的做法。
 # 可达性已实测（见 docs/ci-sync.md 的「探针结论」）。
+#
+# 检测源与安装来源分开（`detect_repo`）：
+# - 上游主仓库在 Gitee；另有 commit 完全一致的 GitHub 镜像 `iJetLi/dsh-providers-hub`。
+# - **检测**默认走 GitHub 镜像（API 更稳，见 docs/ci-sync.md），
+#   **安装来源**仍写 `repo`（Gitee），历史条目一字不改。
+# - 两个地址必须指向同一份代码；镜像落后会让索引钉到旧 commit 上。
+#   镜像是否最新由**镜像仓库自己**的 workflow 保证（见 docs/ci-sync.md「镜像同步」）。
 #
 # 触发：
 # - schedule：每 10 分钟一次，但**错开整点对齐**（:03/:13/:23/:33/:43/:53）。
@@ -18,7 +25,11 @@ on:
   workflow_dispatch:
     inputs:
       repo:
-        description: 上游插件仓库地址（留空用默认）
+        description: 安装来源仓库地址（留空用默认；写进索引的 source.url）
+        required: false
+        default: ''
+      detect_repo:
+        description: 检测源仓库地址（留空用 GitHub 镜像；须与安装来源 commit 一致）
         required: false
         default: ''
       no_repin:
@@ -66,12 +77,16 @@ jobs:
         id: sync
         env:
           INPUT_REPO: ${{ inputs.repo }}
+          INPUT_DETECT_REPO: ${{ inputs.detect_repo }}
           INPUT_NO_REPIN: ${{ inputs.no_repin }}
           # 定时触发时 inputs 为空字符串；「自动」= 沿用索引里已有的形态（粘性），不传开关。
           INPUT_COMMIT_VERSION: ${{ inputs.commit_version }}
         run: |
+          # 安装来源：默认 Gitee 主仓库（写进索引的 source.url，历史条目不变）。
           args=(--out plugin-market.json --require-validator)
-          if [ -n "$INPUT_REPO" ]; then args+=(--repo "$INPUT_REPO"); fi
+          args+=(--repo "${INPUT_REPO:-https://gitee.com/iJetLi/deepseek-harness-codearts}")
+          # 检测源：默认 GitHub 镜像（commit 与 Gitee 一致，API 更稳）。
+          args+=(--detect-repo "${INPUT_DETECT_REPO:-https://github.com/iJetLi/dsh-providers-hub}")
           if [ "$INPUT_NO_REPIN" = "true" ]; then args+=(--no-repin); fi
           # 自动 = 不加 --commit-version（由脚本按索引现状决定沿用还是退场）。
           case "$INPUT_COMMIT_VERSION" in
@@ -101,6 +116,7 @@ jobs:
           VERSION: ${{ steps.sync.outputs.version }}
           ACTION: ${{ steps.sync.outputs.action }}
           CHANGED: ${{ steps.sync.outputs.changed }}
+          COMMIT: ${{ steps.sync.outputs.commit }}
         run: |
           {
             echo "### 插件索引同步"
@@ -108,6 +124,9 @@ jobs:
             echo "| 项 | 值 |"
             echo "|---|---|"
             echo "| 上游最新版本 | \`${VERSION}\` |"
+            echo "| 上游最新 commit | \`${COMMIT}\` |"
             echo "| 版本条目动作 | \`${ACTION}\` |"
             echo "| 索引是否变化 | \`${CHANGED}\` |"
+            echo
+            echo "> 检测源与安装来源不同时，请核对两者 commit 一致（见 docs/ci-sync.md）。"
           } >> "$GITHUB_STEP_SUMMARY"

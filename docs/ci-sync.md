@@ -1,23 +1,53 @@
 # 索引自动同步（GitHub Actions）
 
-把「上游插件仓库推进了」这件事自动化：GitHub 上的定时任务主动去读 **Gitee** 上的上游仓库，
+把「上游插件仓库推进了」这件事自动化：GitHub 上的定时任务主动去读上游仓库，
 发现新版本就更新 `plugin-market.json` 并提交回本仓库。
 
 ```
-Gitee: iJetLi/deepseek-harness-codearts        GitHub: gitMFQ/dsh-plugin-index
-        （上游插件，只读）          ──拉──▶          plugin-market.json
-                                                        │
-                              DSH「发现」页 / plugin_market 工具读取
+Gitee:  iJetLi/deepseek-harness-codearts   ← 安装来源（source.url 写它）
+GitHub: iJetLi/dsh-providers-hub           ← 检测源（commit 与 Gitee 完全一致）
+
+        （检测）──▶ GitHub: gitMFQ/dsh-plugin-index
+                            plugin-market.json
+                                   │
+                     DSH「发现」页 / plugin_market 工具读取
 ```
 
 ## 为什么是「拉」而不是「推」
 
-上游在 Gitee、索引在 GitHub。让 GitHub 托管 runner 主动去读 Gitee，不需要在上游仓库放任何
+上游在 Gitee、索引在 GitHub。让 GitHub 托管 runner 主动去读上游，不需要在上游仓库放任何
 凭据，也不用维护 webhook；反过来（Gitee Go 推到 GitHub）要额外保管一个 GitHub token。
 
-## 探针结论（实测，2026-10-16）
+## 检测源与安装来源分开（`--detect-repo`）
 
-GitHub 托管 runner（`ubuntu-latest`）**可以直连 Gitee**，四种方式全部实测通过：
+上游主仓库在 Gitee，另有一个**内容完全一致**的 GitHub 镜像 `iJetLi/dsh-providers-hub`。
+两者是同一份代码，同一批 commit（同 40 位 SHA），所以可以：
+
+- **从 GitHub 镜像「检测」**最新版本 —— GitHub OpenAPI 更稳、更快；
+- **仍按 Gitee 写「安装来源」** —— 索引里每个版本的 `source.url` 不变，
+  历史条目一个字都不用改，国内用户也不会被迫走 GitHub clone。
+
+```sh
+node scripts/update-index.mjs \
+  --repo        https://gitee.com/iJetLi/deepseek-harness-codearts \
+  --detect-repo https://github.com/iJetLi/dsh-providers-hub
+```
+
+`sync-plugin-index.yml` 已按这个组合作为默认值，**定时任务无需额外配置**。
+只想换检测源、不改安装来源时，手动触发填 `detect_repo` 即可；两个输入都留空则用默认。
+
+⚠️ **两个地址必须指向同一份代码。** 镜像落后会让索引钉到旧 commit 上
+（版本号可能还是新的，但 `source.commit` 指向旧代码）。镜像是否最新由**镜像仓库自己**
+的 workflow 保证；本仓库只负责读。怀疑不一致时对一下两边的 `master`：
+
+```sh
+git ls-remote https://gitee.com/iJetLi/deepseek-harness-codearts refs/heads/master
+git ls-remote https://github.com/iJetLi/dsh-providers-hub     refs/heads/master
+```
+
+## 探针结论（实测，2026-10-16 / 2026-10-18）
+
+**GitHub 托管 runner 可以直连 Gitee**，四种方式全部实测通过（2026-10-16）：
 
 | 方式 | 结果 |
 |---|---|
@@ -25,6 +55,19 @@ GitHub 托管 runner（`ubuntu-latest`）**可以直连 Gitee**，四种方式�
 | `GET .../contents/package.json?ref={sha}`（返回 base64） | 200，约 2.1 s |
 | `GET gitee.com/{owner}/{repo}/raw/master/package.json` | 200，但**有 1 次 302**（跳到 `raw.giteeusercontent.com`） |
 | `git ls-remote https://gitee.com/...` | 成功，约 1.7 s |
+
+**GitHub 镜像的 OpenAPI**（2026-10-18 实测）：`commits?per_page=1` 与
+`contents/package.json?ref={sha}` 各约 1–2 s，路径与 Gitee 完全对称，
+因此两个平台共用 `scripts/lib/remote.mjs` 里的同一段实现。
+
+⚠️ **国内网络可能连不上 `api.github.com`**（实测 `connect ECONNREFUSED 140.82.112.5:443`），
+而 `github.com` 的 git 协议仍可用。所以脚本的读取顺序是：
+
+```
+GitHub/Gitee API  →  失败则 git clone --depth 1  →  仍失败且配了 fallbackUrl 则改用另一源
+```
+
+三级兜底已逐条实测（404 镜像、DNS 不可达、正常路径）。GitHub runner 上通常停在第一级。
 
 两点必须记住：
 
@@ -139,7 +182,8 @@ node scripts/update-index.mjs --check   # 有变化则退出码 1（给 CI / 脚
 
 | 参数 | 说明 |
 |---|---|
-| `--repo <url>` | 换上游仓库（只支持 `https://gitee.com/<owner>/<repo>`） |
+| `--repo <url>` | **安装来源**仓库（写进索引的 `source.url`）；支持 `https://gitee.com/<owner>/<repo>` 与 `https://github.com/<owner>/<repo>` |
+| `--detect-repo <url>` | **检测源**仓库（读最新 commit）；默认与 `--repo` 相同。指向 commit 一致的镜像即可只换检测通道 |
 | `--out <path>` | 输出索引路径，默认 `plugin-market.json` |
 | `--no-repin` | 同版本不重定 commit |
 | `--commit-version [prerelease\|build\|never]` | 把 commit 编进版本号，让「只改代码没抬版本号」也能点升级；不写形态时用 `prerelease`，`never` 显式关闭 |
@@ -156,8 +200,13 @@ node scripts/update-index.mjs --check   # 有变化则退出码 1（给 CI / 脚
 
 ## 已知限制
 
-- **只有 Gitee 上游**：`--repo` 目前只认 `gitee.com` 形式。上游若迁到 GitHub，
-  换成 `gh api` / 直接 `git ls-remote` 即可，规则文件不用动。
+- **只认 Gitee / GitHub 两个站点**：`--repo` / `--detect-repo` 目前只接受
+  `https://gitee.com/...` 与 `https://github.com/...`。其它站点会直接报错退出
+  （索引的 `source.url` 本来就只允许这两种形态，早报错好过跑完一轮才校验失败）。
+  上游若迁到别处，改 `scripts/lib/remote.mjs` 的 `parseRepoUrl` 即可，规则文件不用动。
+- **镜像与主仓库的一致性不由本仓库保证**：本索引只负责「读」，不做两边 commit 比对
+  （那要多打一次 API）。镜像落后会表现为索引的 `source.commit` 停在旧值，
+  日志里能直接看到读到的 commit，对一下 `git ls-remote` 即可确认。
 - **cron 不精确，且可能被丢弃**：官方文档（[\`schedule\` 事件](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)）明确：
   > The `schedule` event can be delayed during periods of high loads … High load times include
   > the start of every hour. If the load is sufficiently high enough, **some queued jobs may be dropped**.
@@ -169,9 +218,10 @@ node scripts/update-index.mjs --check   # 有变化则退出码 1（给 CI / 脚
 - **10 分钟一次的代价**：
   - 运行分钟**不花钱**：公共仓库用标准 GitHub 托管 runner 是免费额度外的（
     见 [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)）。
-  - API 调用量上来了：每次 run 打两次 Gitee OpenAPI（`commits` + `contents`），
-    10 分钟一次约 **288 次/天**；未认证调用可能被限流，脚本已有 3 次退避重试 +
-    `git clone` 兜底，但限流严重时同步会变慢。真被限流可把 cron 放宽（如 `8,38 * * * *`）。
+  - API 调用量上来了：每次 run 打两次检测源 OpenAPI（`commits` + `contents`），
+    10 分钟一次约 **288 次/天**。未认证调用可能被限流（GitHub 未认证限额约 60 次/小时，
+    288 次/天 ≈ 12 次/小时，余量充足；Gitee 侧同理），脚本已有 3 次退避重试 +
+    `git clone` 兜底 + 换源兜底，但限流严重时同步会变慢。真被限流可把 cron 放宽（如 `8,38 * * * *`）。
   - 绝大多数 run 都是「无变化、直接结束」，不产生空提交。
 - **`publishTimestamp` 取的是 commit 的 committer 时间**，不是「发布版本的时间」。
   上游 rebase / amend 会让它变化，于是 repin 判定会把该版本视作「目标变了」而重写最新条目
