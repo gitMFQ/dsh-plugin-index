@@ -168,6 +168,45 @@ DSH 判断有没有新版本**只比 SemVer 字符串，从不看 commit**：
 **不要**简化成 `^0.1.2-rc.1`：那会顺带放行同主版本下从未验证过的版本。宁可窄，不可宽。
 上游哪天新增了 `@deepseek-ai/dsh-xxx` peer，重跑一次脚本就会自动把新范围并进来。
 
+## 事件驱动唤醒（`repository_dispatch`）
+
+`schedule` 会被限流（实测间隔 1.8h / 3.7h / 5h），单靠 cron 追不上上游。因此索引
+额外接受一个 **`wake-index`** 事件：
+
+```
+gitMFQ/dsh-providers-hub（镜像的 fork，只当哨兵）
+        │  每 10 分钟比对「上游 HEAD」与「索引已收录的 commit」
+        │  不一致 → POST /repos/gitMFQ/dsh-plugin-index/dispatches
+        ▼
+gitMFQ/dsh-plugin-index  sync-plugin-index（event: repository_dispatch）
+        │  走与定时任务完全相同的 job 与默认参数
+        ▼
+plugin-market.json 更新并提交
+```
+
+要点：
+
+- **cron 保留为兜底**。两条路径互不依赖：dispatch 丢了还有 schedule，schedule 被限流还有 dispatch。
+- **哨兵不承载内容**。fork 里存的是 workflow 文件，所以它**永远**比上游多一个 commit，
+  不能用来「快进同步上游」；检测源仍是上游镜像 `iJetLi/dsh-providers-hub`。
+- **判据必须用 contents API，不能用 raw**。实测索引仓库 push 后，
+  `raw.githubusercontent.com` 仍返回旧内容（约 1–2 分钟缓存），会把「已落后」误判成
+  「已最新」而漏掉唤醒。哨兵用 `contents?ref=master` + `Cache-Control: no-cache`。
+- **取不到索引内容时按「需要唤醒」处理**：多跑一次幂等同步，代价远小于漏更新。
+
+### 凭据
+
+哨兵需要 `INDEX_WAKE_TOKEN`（fork 仓库的 secret）：一个对 `gitMFQ/dsh-plugin-index`
+有写权限的 PAT。未配置时工作流**不失败**，只给 warning 并跳过唤醒。
+
+### 手动补一次
+
+```sh
+gh workflow run wake-index.yml -R gitMFQ/dsh-providers-hub --ref master
+# 或直接叫醒索引（跳过哨兵的比对）
+gh workflow run sync-plugin-index.yml -R gitMFQ/dsh-plugin-index --ref master
+```
+
 ## 本地怎么跑
 
 ```sh
@@ -215,6 +254,7 @@ node scripts/update-index.mjs --check   # 有变化则退出码 1（给 CI / 脚
   所以：① 定时任务可能延迟甚至被丢弃；② **不要**用 `*/10`（精确落在 :00/:10/:20… 这些最拥挤的槽位），
   本仓库用 `3,13,23,33,43,53 * * * *` 错开整点；③ 仓库 60 天无活动会自动停用定时任务
   （本仓库由 CI 自己提交，一般不会闲置到 60 天）。GitHub 的 schedule 最小间隔是 5 分钟。
+  **缓解**：`repository_dispatch` 事件驱动（见上），不依赖 cron 的运气。
 - **10 分钟一次的代价**：
   - 运行分钟**不花钱**：公共仓库用标准 GitHub 托管 runner 是免费额度外的（
     见 [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)）。

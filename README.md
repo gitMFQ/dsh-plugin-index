@@ -98,6 +98,11 @@ DSH 的索引是一个 JSON 文件，`format: 1`，顶层字段：
 镜像整站不可达时会自动退回主仓库检测。也可以在 **Actions → sync-plugin-index → Run workflow**
 手动触发。
 
+**事件驱动**：除定时任务外，索引还接受 `repository_dispatch`（`wake-index`）事件 ——
+fork [`gitMFQ/dsh-providers-hub`](https://github.com/gitMFQ/dsh-providers-hub) 每 10 分钟
+比对上游 HEAD 与索引已收录的 commit，不一致就主动叫醒索引，绕开 `schedule` 被限流的问题。
+cron 保留作兜底，两条路径互不依赖。详见 [docs/ci-sync.md](docs/ci-sync.md) 的「事件驱动唤醒」。
+
 ⚠️ 一个必须知道的语义：**DSH 判断「有没有新版本」用的是 SemVer 比较，不是 commit 比较**。
 所以只有上游**真的抬了版本号**，已安装的用户才会看到「有新版本」；上游只改代码不抬版本号时，
 脚本会**重定最新版本那条的 commit**，让**新安装**的用户拿到最新代码，但老用户不会看到更新提示。
