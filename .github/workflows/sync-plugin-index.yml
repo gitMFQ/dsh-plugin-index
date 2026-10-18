@@ -18,10 +18,16 @@ name: sync-plugin-index
 #   官方文档明确：`schedule` 在高负载时会延迟，负载足够高时**排队任务会被丢弃**，
 #   而「整点（start of every hour）」正是高负载时段，并建议避开整点的对齐槽位。
 #   用 `*/10` 会精确落在 :00/:10/:20… 这些最拥挤的槽位，故写成显式列表。
+# - repository_dispatch：**事件驱动唤醒**，由 `gitMFQ/dsh-providers-hub`（镜像的 fork）
+#   在发现上游有新 commit 时发 `wake-index` 事件触发。cron 会被限流、可能延迟数小时，
+#   这条路径不受 schedule 限流影响，是「上游一推、索引就跟」的主通道。
+#   见 docs/ci-sync.md 的「事件驱动唤醒」。
 # - workflow_dispatch：手动，可临时换上游仓库或关掉「同版本重定 commit」。
 on:
   schedule:
     - cron: '3,13,23,33,43,53 * * * *'
+  repository_dispatch:
+    types: [wake-index]
   workflow_dispatch:
     inputs:
       repo:
