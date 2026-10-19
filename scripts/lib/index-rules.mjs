@@ -194,21 +194,30 @@ export function syntheticVersion(version, commit, style = 'prerelease') {
  * 把手工打开的合成形态冲掉、索引里又会多出一条同版本号的普通条目。
  * 认出形态后，不带开关的运行也会沿用，人工只需开一次。
  *
- * 同时返回 `base`，供调用方判断**上游是否已经抬了版本号**：
- * 抬了就该让合成后缀自然退场，用户装完能回到干净的版本号
- * （否则本机版本与索引的合成版本永远不等，「有新版本」徽标永不消失）。
+ * **只认版本最高的那一条**（`base` 随之返回，便于日志说明「挂在哪个版本核心上」）：
+ * 模式是「索引现状」的声明，最新条目长什么样就是什么模式。历史条目里残留的合成后缀
+ * **没有投票权** —— 否则 `--commit-version never` 清掉当前那条之后，更旧的合成条目会立刻
+ * 把模式粘回来，开关就再也关不掉了。
+ *
+ * **上游抬版本号也不退场**：这是调用方（`update-index.mjs`）的行为 —— 抬版本只是换了
+ * 版本核心，合成形态照旧挂到新版本上（`0.2.0-rc.11.commit.aaa` → `0.2.1-rc.2.commit.bbb`）。
+ * 代价是本机装出来的干净版本号与索引的合成版本永远不等，「有新版本」徽标不会自动消失；
+ * 想回到干净版本号只能显式 `--commit-version never`。
  *
  * @param versions - 现有 `versions[]`。
- * @returns `{ style, base }`；索引里没有合成版本时返回 `false`。
+ * @returns `{ style, base }`；最新条目不是合成版本（或数组为空）时返回 `false`。
  */
 export function detectSyntheticStyle(versions) {
+  let latest
   for (const version of versions) {
     if (typeof version?.version !== 'string') continue
-    const dotted = /^(.+?)\.commit\.[0-9a-f]{4,40}$/u.exec(version.version)
-    if (dotted !== null) return { style: 'prerelease', base: dotted[1] }
-    const built = /^(.+?)\+.*commit\.[0-9a-f]{4,40}$/u.exec(version.version)
-    if (built !== null) return { style: 'build', base: built[1] }
+    if (latest === undefined || compareSemver(version.version, latest) > 0) latest = version.version
   }
+  if (latest === undefined) return false
+  const dotted = /^(.+?)\.commit\.[0-9a-f]{4,40}$/u.exec(latest)
+  if (dotted !== null) return { style: 'prerelease', base: dotted[1] }
+  const built = /^(.+?)\+.*commit\.[0-9a-f]{4,40}$/u.exec(latest)
+  if (built !== null) return { style: 'build', base: built[1] }
   return false
 }
 

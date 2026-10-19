@@ -46,6 +46,18 @@
  *
  * 同一版本核心只保留最新那条（pruneBase），上游反复推送不会让索引无限膨胀。
  *
+ * 粘性（开一次就一直生效，**抬版本号也不退场**）
+ * --------------------------------------------
+ * 开关一旦在索引里生效，不带 `--commit-version` 的定时任务会**一直沿用**它
+ * （见 `detectSyntheticStyle`：只看索引里版本最高的那条）。上游抬版本号时也一样沿用 ——
+ * 只是换了版本核心，后缀跟着挂到新版本上：
+ * `0.2.0-rc.11.commit.15f2a79` → 上游发布 `0.2.1-rc.2` → `0.2.1-rc.2.commit.e14729c`。
+ *
+ * 所以「索引里的版本号永远带 commit」是**一次开启、长期有效**的状态；
+ * 想退回干净版本号必须**显式**关：`--commit-version never`（手动触发时选「关闭」）。
+ * 关掉之后最新那条变成干净版本号，后续定时任务不会再把它粘回来
+ * （历史条目里残留的合成后缀不作数）。
+ *
  * 检测源与安装来源可以分开：`--detect-repo`
  * -----------------------------------------
  * 上游主仓库在 Gitee，另有一个 commit 完全一致的 GitHub 镜像
@@ -63,9 +75,10 @@
  * 但会把检测到的 commit 打印出来；怀疑镜像落后时用
  * `git ls-remote` 或 `curl` 各自对一下 `master` 的 sha 即可。
  *
- * 代价（说清楚才好决定要不要开）：本机装的 `package.json` 里版本仍是 `0.2.0-rc.11`，
- * 与索引的合成版本永远不等，所以「有新版本」提示在装完后**不会自动消失**，
- * 装一次即可，是无害的重复安装。想要干净的更新提示，仍应让上游抬版本号。
+ * 代价（说清楚才好决定要不要开）：本机装的 `package.json` 里版本仍是 `0.2.1-rc.2`，
+ * 与索引的合成版本永远不等，所以「有新版本」提示在装完后**不会自动消失**（徽标常亮），
+ * 装一次即可，是无害的重复安装。**抬版本号也治不好它** —— 因为合成模式是粘性的，
+ * 新版本照样带后缀。想要干净的更新提示，就得显式 `--commit-version never` 关掉合成模式。
  */
 import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -128,20 +141,22 @@ const document = loadIndexDocument(out)
 const plugin = document.plugins.find((candidate) => candidate.name === remote.manifest.name)
 
 // 粘性：没显式指定形态时，沿用索引里已有的合成形态（让定时 CI 不会把手工打开的模式冲掉）。
-// 但**上游一旦抬了版本号**就自动退场：否则本机装回原始版本号后，索引仍挂着
-// `0.2.0-rc.11.commit.xxx`，「有新版本」徽标永不消失。抬版本后回到干净的原生版本号。
+// **上游抬了版本号也沿用**：抬版本只是换个版本核心，后缀挂到新版本上
+// （`0.2.0-rc.11.commit.aaa` → `0.2.1-rc.2.commit.bbb`），而不是退场 ——
+// 退场会让「只改代码期间」打开的开关在上游一抬版本时整段丢失，用户又看不出装的是哪个 commit。
+// 要退回干净版本号只能显式 `--commit-version never`。
 const detected = detectSyntheticStyle(plugin?.versions ?? [])
 let commitVersion =
   requestedStyle === false ? (detected === false ? false : detected.style) : requestedStyle === 'never' ? false : requestedStyle
 if (requestedStyle === 'never') {
   console.log('  --commit-version never：显式关闭合成版本，回到上游原始版本号')
 } else if (requestedStyle === false && detected !== false) {
-  if (detected.base !== remote.manifest.version) {
-    console.log(`  上游版本号已从 ${detected.base} 抬到 ${remote.manifest.version}，合成后缀自动退场`)
-    commitVersion = false
-  } else {
-    console.log(`  沿用索引里已有的合成版本形态：${detected.style}（可用 --commit-version 覆盖）`)
-  }
+  const bumped = detected.base !== remote.manifest.version
+  console.log(
+    bumped
+      ? `  上游版本号已从 ${detected.base} 抬到 ${remote.manifest.version}，合成形态沿用（新版本继续编入 commit）`
+      : `  沿用索引里已有的合成版本形态：${detected.style}（可用 --commit-version 覆盖）`,
+  )
 }
 
 const entry = buildVersionEntry({
@@ -161,7 +176,7 @@ const { versions, action } = mergeVersion(plugin?.versions ?? [], entry, {
   repin,
   // 同一版本核心只留一条，但**仅在合成模式相关时**才裁剪：
   // - 正在用合成模式：清掉同核心的旧 commit 条目；
-  // - 正在关闭（never）或上游抬版本后自动退场：清掉同核心残留的合成条目。
+  // - 正在关闭（never）：清掉同核心残留的合成条目，让最新条目干净、后续不再被粘回来。
   // 全程没碰过合成模式的普通仓库保持原有「只追加、不改历史」的行为。
   pruneBase: commitVersion !== false || detected !== false,
 })

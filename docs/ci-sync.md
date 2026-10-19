@@ -114,6 +114,9 @@ status: semver.valid(installedVersion) !== null && semver.gt(version, installedV
 所以默认情况下：**想让老用户拿到更新，上游必须抬版本号。** 索引这一侧能做的只是
 「版本号一动就自动收录」+「版本号没动时保证新装用户拿到最新代码（repin）」。
 
+> 打开下面的 `--commit-version`（把 commit 编进版本号）后，上表两行的版本号都会带
+> `.commit.xxxxxxx` 后缀，抬版本号那行也不例外（`0.2.1-rc.2.commit.e14729c`）。
+
 ### 不抬版本号也想能点升级：`--commit-version`
 
 DSH 判断有没有新版本**只比 SemVer 字符串，从不看 commit**：
@@ -136,15 +139,28 @@ DSH 判断有没有新版本**只比 SemVer 字符串，从不看 commit**：
 同一版本核心只保留一条（`pruneBase`）：上游在同一版本号上又推了代码时，
 旧的 `0.2.0-rc.11` 与 `0.2.0-rc.11.commit.aaaaaaa` 都会被新 commit 取代，索引不会无限膨胀。
 
-**粘性与自动退场**：开关是「粘性」的 —— 索引里已经在用合成形态时，
-不带 `--commit-version` 的定时任务会**沿用**它（所以人工只需开一次，CI 不会冲掉）。
-但上游一旦**真的抬了版本号**（`rc.11` → `rc.12`），合成后缀会**自动退场**，
-索引回到干净的原生版本号，用户装完就能正常显示「已安装」。
-想手动关掉：`--commit-version never`（或手动触发时选「关闭」）。
+**粘性（开一次就一直生效，抬版本号也带）**：开关是「粘性」的 —— 索引里已经在用合成形态时，
+不带 `--commit-version` 的定时任务会**一直沿用**它（人工只需开一次，CI 不会冲掉）。
+判据只看**索引里版本最高的那一条**：最新条目长什么样，就是什么模式。
+**上游抬版本号也不退场** —— 抬版本只是换了版本核心，后缀跟着挂到新版本上：
 
-代价：本机 `package.json` 里的版本仍是 `0.2.0-rc.11`，与索引的 `0.2.0-rc.11.commit.xxx`
-永远不等，所以装完后「有新版本」提示**不会自动消失**。装一次即可，无害。
-想要干净的更新提示，仍应让上游抬版本号。
+```
+0.2.0-rc.11.commit.15f2a79   上游发布 0.2.1-rc.2   →   0.2.1-rc.2.commit.e14729c
+```
+
+所以「索引里每个版本都带 commit」是**一次开启、长期有效**的状态：
+
+```sh
+npm run sync:commit-version        # 开（等价于手动触发时选 prerelease / build）
+node scripts/update-index.mjs --commit-version never   # 关：显式退回干净版本号
+```
+
+关掉后最新那条变成干净版本号，后续定时任务**不会**再把它粘回来
+（更旧条目里残留的合成后缀不作数）。
+
+代价：本机 `package.json` 里的版本是干净的 `0.2.1-rc.2`，与索引的 `0.2.1-rc.2.commit.xxx`
+永远不等，所以装完后「有新版本」提示**不会自动消失**（徽标常亮）。装一次即可，无害。
+**抬版本号也治不好它** —— 新版本照样带后缀；想要干净的更新提示只能 `never` 关掉合成模式。
 
 ### repin 的边界
 
@@ -225,7 +241,7 @@ node scripts/update-index.mjs --check   # 有变化则退出码 1（给 CI / 脚
 | `--detect-repo <url>` | **检测源**仓库（读最新 commit）；默认与 `--repo` 相同。指向 commit 一致的镜像即可只换检测通道 |
 | `--out <path>` | 输出索引路径，默认 `plugin-market.json` |
 | `--no-repin` | 同版本不重定 commit |
-| `--commit-version [prerelease\|build\|never]` | 把 commit 编进版本号，让「只改代码没抬版本号」也能点升级；不写形态时用 `prerelease`，`never` 显式关闭 |
+| `--commit-version [prerelease\|build\|never]` | 把 commit 编进版本号，让「只改代码没抬版本号」也能点升级；不写形态时用 `prerelease`。开一次即长期有效（抬版本号也带），`never` 显式关闭 |
 | `--engines <range>` | 显式指定 `engines.dsh`，覆盖自动推导 |
 | `--dry-run` | 只报告，不写文件 |
 | `--check` | 有变化则退出码 1 |

@@ -45,6 +45,11 @@ https://cdn.jsdelivr.net/gh/gitMFQ/dsh-plugin-index@master/plugin-market.json
 来源是 `https://gitee.com/iJetLi/deepseek-harness-codearts`，每个版本都锁定到
 **完整 40 位 commit**，不是浮动分支 —— 索引一旦发布就不会被上游推进悄悄改变。
 
+版本号本身也**带 commit 短号**（`0.2.1-rc.2.commit.e14729c`，本索引长期开启此模式）：
+完整 40 位 SHA 在 `source.commit` 里，版本号里的 7 位只是给人看的。这样做是因为
+DSH 判断「有没有新版本」只比 SemVer、从不看 commit，把 commit 编进版本号才能让
+「上游只改代码、没抬版本号」时也出现可点的安装按钮。开关是粘性的，**上游抬版本号也照样带**。
+
 > 上游另有内容一致的 GitHub 镜像 [`iJetLi/dsh-providers-hub`](https://github.com/iJetLi/dsh-providers-hub)
 > （同一批 commit、同 40 位 SHA）。CI **从镜像检测**新版本（API 更稳），
 > 但索引里写的**安装来源仍是 Gitee** —— 国内安装速度不受影响，历史条目也不变。
@@ -110,7 +115,13 @@ cron 保留作兜底，两条路径互不依赖。详见 [docs/ci-sync.md](docs/
 想让「只改代码没抬版本号」也能点升级，手动触发时把 `commit_version` 选成
 `prerelease`（推荐）或 `build`：索引版本会写成 `0.2.0-rc.11.commit.15f2a79`
 这类形态，既能出现可点的安装按钮，又不会压住上游未来的真版本 `0.2.0-rc.12`。
-代价是装完后「有新版本」提示不会自动消失（本机版本号没变），装一次即可，无害。
+
+**这个开关是粘性的，而且抬版本号也不退场**：开一次之后，不带开关的定时任务会一直沿用，
+上游发布新版本时后缀跟着挂到新版本上（`0.2.0-rc.11.commit.15f2a79` → `0.2.1-rc.2.commit.e14729c`），
+也就是**索引里的版本号会一直带 commit**。想退回干净版本号必须显式选「关闭」
+（命令行 `--commit-version never`），关掉后不会再被自动粘回来。
+代价是装完后「有新版本」提示不会自动消失（本机版本号是干净的，与索引永远不等），
+装一次即可，无害。
 
 详见 [docs/ci-sync.md](docs/ci-sync.md)。
 
@@ -136,7 +147,7 @@ node ../dsh-plugin-index/scripts/generate-index.mjs \
 npm install            # 只装官方校验器
 npm run sync:dry       # 看会怎么改，不写文件（已默认走 GitHub 镜像检测）
 npm run sync           # 写 plugin-market.json
-npm run sync:commit-version   # 同 sync，但把 commit 编进版本号（让只改代码也能点升级）
+npm run sync:commit-version   # 打开「把 commit 编进版本号」（粘性，开一次即可；抬版本号也带）
 npm run validate       # 只校验现有索引
 ```
 

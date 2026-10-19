@@ -44,7 +44,7 @@ on:
         type: boolean
         default: false
       commit_version:
-        description: 把 commit 编进版本号，让「只改代码没抬版本号」也能点升级
+        description: 把 commit 编进版本号，让「只改代码没抬版本号」也能点升级（开一次即长期有效，抬版本号也带）
         required: false
         type: choice
         default: 自动
@@ -85,7 +85,7 @@ jobs:
           INPUT_REPO: ${{ inputs.repo }}
           INPUT_DETECT_REPO: ${{ inputs.detect_repo }}
           INPUT_NO_REPIN: ${{ inputs.no_repin }}
-          # 定时触发时 inputs 为空字符串；「自动」= 沿用索引里已有的形态（粘性），不传开关。
+          # 定时触发时 inputs 为空字符串；「自动」= 沿用索引最新条目已有的形态（粘性），不传开关。
           INPUT_COMMIT_VERSION: ${{ inputs.commit_version }}
         run: |
           # 安装来源：默认 Gitee 主仓库（写进索引的 source.url，历史条目不变）。
@@ -94,7 +94,7 @@ jobs:
           # 检测源：默认 GitHub 镜像（commit 与 Gitee 一致，API 更稳）。
           args+=(--detect-repo "${INPUT_DETECT_REPO:-https://github.com/iJetLi/dsh-providers-hub}")
           if [ "$INPUT_NO_REPIN" = "true" ]; then args+=(--no-repin); fi
-          # 自动 = 不加 --commit-version（由脚本按索引现状决定沿用还是退场）。
+          # 自动 = 不加 --commit-version（由脚本按索引最新条目决定是否沿用合成形态）。
           case "$INPUT_COMMIT_VERSION" in
             prerelease|build) args+=(--commit-version "$INPUT_COMMIT_VERSION") ;;
             关闭) args+=(--commit-version never) ;;
