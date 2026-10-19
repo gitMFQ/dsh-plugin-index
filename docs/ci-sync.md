@@ -215,6 +215,34 @@ plugin-market.json 更新并提交
 哨兵需要 `INDEX_WAKE_TOKEN`（fork 仓库的 secret）：一个对 `gitMFQ/dsh-plugin-index`
 有写权限的 PAT。未配置时工作流**不失败**，只给 warning 并跳过唤醒。
 
+### ⚠️ fork 里的 schedule 默认被禁用
+
+这是哨兵方案最大的坑，**GitHub 官方文档明写**：
+
+> To prevent unnecessary workflow runs, scheduled workflows may be disabled automatically.
+> **When a public repository is forked, scheduled workflows are disabled by default.**
+
+实测佐证：哨兵上线后 `wake-index` 只有 `workflow_dispatch` 记录，
+**`schedule` 一次都没跑过**（对比索引仓库同期有 9 次 schedule）。
+Workflow 状态显示 `active` 也不代表 cron 会触发 —— `active` 只表示「没被手动禁用」。
+
+启用方式（任一）：
+
+1. **网页**：fork 仓库 → Actions → 左侧选中 `wake-index` → 点 **Enable workflow**
+2. **API**：
+   ```sh
+   gh api -X PUT repos/gitMFQ/dsh-providers-hub/actions/workflows/<workflow_id>/enable
+   ```
+3. **推一次任何 commit** 到 fork（部分情况下会重置调度）
+
+还有一条独立限制：**公开仓库 60 天无活动会自动停用 schedule**。
+「活动」指 commit / PR / issue / 评论，**不包括 workflow 运行**。
+哨兵只读不写，可能长期无 commit —— 需要在 60 天内推一次空提交保活。
+
+**因此不要把索引的更新完全押在哨兵的 cron 上。** 索引仓库自己的
+`schedule`（`sync-plugin-index.yml`）是主兜底，两条路径互不依赖；
+哨兵失效时索引仍会按自己的节奏轮询，只是退化成「慢但能用」。
+
 ### 手动补一次
 
 ```sh
