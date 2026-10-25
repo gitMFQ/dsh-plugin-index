@@ -92,7 +92,7 @@ jobs:
           args=(--out plugin-market.json --require-validator)
           args+=(--repo "${INPUT_REPO:-https://gitee.com/iJetLi/deepseek-harness-codearts}")
           # 检测源：默认 GitHub 镜像（commit 与 Gitee 一致，API 更稳）。
-          args+=(--detect-repo "${INPUT_DETECT_REPO:-https://github.com/iJetLi/dsh-providers-hub}")
+          args+=(--detect-repo "${INPUT_DETECT_REPO:-https://gitee.com/iJetLi/deepseek-harness-codearts}")
           if [ "$INPUT_NO_REPIN" = "true" ]; then args+=(--no-repin); fi
           # 自动 = 不加 --commit-version（由脚本按索引最新条目决定是否沿用合成形态）。
           case "$INPUT_COMMIT_VERSION" in
