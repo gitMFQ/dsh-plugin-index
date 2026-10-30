@@ -77,7 +77,7 @@
       },
       "versions": [
         {
-          "version": "0.2.1-rc.2",
+          "version": "0.2.1-rc.2+commit.c3afc20",
           "publishTimestamp": 1793387766,
           "source": {
             "type": "git",
