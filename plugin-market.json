@@ -77,12 +77,12 @@
       },
       "versions": [
         {
-          "version": "0.2.1-rc.2+commit.6250518",
-          "publishTimestamp": 1793975213,
+          "version": "0.2.1-rc.2+commit.5042cec",
+          "publishTimestamp": 1794055498,
           "source": {
             "type": "git",
             "url": "https://gitee.com/iJetLi/deepseek-harness-codearts",
-            "commit": "6250518ab29965deb14c250fb39356564dda9738"
+            "commit": "5042cec86a88c01e0061346de0b8c5d325aa2422"
           },
           "engines": {
             "dsh": "^0.1.2-rc.1 || ^0.1.7-rc.2 || ^0.2.0-rc.1 || ^0.2.1-rc.2"
